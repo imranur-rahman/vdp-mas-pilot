@@ -1,0 +1,8 @@
+runs/*
+!runs/.gitkeep
+traces/*
+!traces/.gitkeep
+.env
+*.env
+__pycache__/
+.venv/
