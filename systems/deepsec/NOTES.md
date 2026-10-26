@@ -9,7 +9,8 @@
 
 - Supported tech: JS/TS, Python, PHP, Ruby, Go, Rust, JVM, .NET — not C/C++ (D8).
 - State in `.deepsec/`.
-- Unverified: does the `claude` backend honor `ANTHROPIC_BASE_URL`?
+- (Re-checked at `4fa6722`.) The `claude` backend passes `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` to the Claude Agent SDK (`buildClaudeEnv`). The `codex` backend uses `OPENAI_BASE_URL`, falling back to `ANTHROPIC_BASE_URL`.
+- No matcher targets `.c/.h/.cc/.cpp`. Open: can it analyze C files at all without a plugin matcher?
 
 ## Adapter (ticket in `.scratch/tickets/`)
 

@@ -7,7 +7,8 @@
 
 ## Facts from an earlier source read (re-check at HEAD)
 
-- Fixed graph of 16 ADK agents with classifier gates; findings in a SQLite database.
+- Fixed graph (`reference/workflow.json`): 15 agent nodes + 4 classifier gates (no model; code-side). Findings in a SQLite database. (Re-checked at `f3162c0`; earlier note said 16 agents.)
+- Per-node `model`/`api_base` in workflow.json; `LLM_API_BASE` env fallback. Precedence `--model` > `MANTIS_MODEL` > node > `MODEL_ID` > default, so leave the first two unset to use per-role aliases.
 - Do not use `--objective` (an LLM then builds a new agent graph).
 - Native traces: OpenTelemetry spans from Google ADK.
 

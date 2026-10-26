@@ -8,7 +8,8 @@
 ## Facts from an earlier source read (re-check at HEAD)
 
 - Orchestrator is fixed code: Recon → Scan/Triage and Finding → Verification.
-- Sandbox tools list PHP, Python, JS, Java, Go, Ruby, Shell — not C/C++ (D8).
+- (Re-checked at `b26025f`.) `RunCodeTool`: python, php, javascript, ruby, go, java, bash. `SandboxTool` allowlist lacks gcc/clang, but it checks only the first token, so `bash -c "gcc ..."` passes, and the sandbox image has `build-essential` + `clang`. The audit skill library covers C/C++. No OSS-Fuzz/sanitizer build in its sandbox. Whether it can reproduce a CyberGym crash is still open (D8).
+- Routing: `<PREFIX>_BASE_URL`, falling back to `LLM_BASE_URL`.
 - Starts its own Docker sandbox. No native traces.
 
 ## Adapter (ticket in `.scratch/tickets/`)
