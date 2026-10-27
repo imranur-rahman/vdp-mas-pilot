@@ -44,6 +44,14 @@ def test_adaptive_thinking_gets_summarized_display(proxy, upstream, make_key):
     assert upstream.last()["thinking"] == {"type": "adaptive", "display": "summarized"}
 
 
+def test_legacy_budget_thinking_from_claude_code_ends_up_adaptive_and_summarized(proxy, upstream, make_key):
+    key = make_key(pilot_run_id="t-legacy", pilot_run_kind="data")
+    messages(proxy, key, max_tokens=32000, thinking={"type": "enabled", "budget_tokens": 31999})
+    assert upstream.last()["thinking"] == {"type": "adaptive", "display": "summarized"}
+    rec = wait_for_log(proxy["runs"] / "t-legacy" / "proxy.jsonl")[-1]
+    assert rec["pilot"]["pilot_client_thinking"] == {"type": "enabled", "budget_tokens": 31999}
+
+
 def test_between_tools_thinking_is_left_alone(proxy, upstream, make_key):
     key = make_key(pilot_run_id="t-bt", pilot_run_kind="dev")
     messages(proxy, key, thinking={"type": "between_tools"})

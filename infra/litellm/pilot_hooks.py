@@ -5,8 +5,9 @@ runs inside the stock image.
 
 Pre-call: resolve the run from the virtual key's metadata, route to the run
 kind's model without changing what the system asked for (ADR 0002), remove
-sampling settings Sonnet 5.5 rejects (M-3), ask for summarized thinking
-(M-1), and attach pilot labels for the log.
+sampling settings Sonnet 5.5 rejects (M-3), and attach pilot labels for the
+log. Summarized thinking (M-1) and provider routing are set on the finished
+upstream body (see finish_upstream_body).
 
 Logging: append one raw record per call to runs/<run_id>/proxy.jsonl.
 """
@@ -25,24 +26,33 @@ from litellm.llms.anthropic.pass_through.messages.transformation import Anthropi
 RUNS_DIR = Path(os.environ.get("PILOT_RUNS_DIR", "/runs"))
 ROUTES = {"data": "pilot-data", "dev": "pilot-dev", "tooling": "pilot-tooling"}
 REJECTED_SAMPLING = ("temperature", "top_p", "top_k")
-# OpenRouter provider routing (ADR 0003). LiteLLM's Anthropic request builders
-# keep only known Anthropic fields, so `provider` is added to the finished
-# body. Pinned to LiteLLM 1.106.4; tests/proxy guards both paths.
+# Finishing touches on the upstream body, applied after LiteLLM's own request
+# builders: they keep only known Anthropic fields (dropping `provider`), and
+# they rewrite legacy `thinking: enabled + budget_tokens` (sent by Claude Code)
+# into `adaptive` after the pre-call hook has run. Pinned to LiteLLM 1.106.4;
+# tests/proxy guards both paths.
 PROVIDER_ROUTING = {"order": ["anthropic"], "allow_fallbacks": False}
 
 
-def _add_provider_routing(build):
+def finish_upstream_body(body: dict) -> dict:
+    body["provider"] = PROVIDER_ROUTING  # ADR 0003
+    thinking = body.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("type") == "adaptive" \
+            and thinking.get("display") in (None, "omitted"):
+        thinking["display"] = "summarized"  # M-1; between_tools takes no display
+    return body
+
+
+def _finish(build):
     @functools.wraps(build)
     def wrapper(*args, **kwargs):
-        body = build(*args, **kwargs)
-        body["provider"] = PROVIDER_ROUTING
-        return body
+        return finish_upstream_body(build(*args, **kwargs))
     return wrapper
 
 
-AnthropicMessagesConfig.transform_anthropic_messages_request = _add_provider_routing(
+AnthropicMessagesConfig.transform_anthropic_messages_request = _finish(
     AnthropicMessagesConfig.transform_anthropic_messages_request)
-AnthropicConfig.transform_request = _add_provider_routing(AnthropicConfig.transform_request)
+AnthropicConfig.transform_request = _finish(AnthropicConfig.transform_request)
 
 
 def system_prompt_text(data: dict) -> str:
@@ -85,13 +95,6 @@ class PilotHooks(CustomLogger):
         for p in dropped:
             data.pop(p)
 
-        display_set = False
-        thinking = data.get("thinking")
-        if isinstance(thinking, dict) and thinking.get("type") == "adaptive" \
-                and thinking.get("display") in (None, "omitted"):
-            thinking["display"] = "summarized"
-            display_set = True
-
         mk = metadata_key(data)
         data.setdefault(mk, {})
         data[mk].update({
@@ -101,7 +104,7 @@ class PilotHooks(CustomLogger):
             "pilot_role": key_meta.get("pilot_role"),
             "pilot_requested_model": requested_model,
             "pilot_dropped_params": dropped,
-            "pilot_thinking_display_set": display_set,
+            "pilot_client_thinking": data.get("thinking"),
             "pilot_prompt_hash": prompt_hash(data),
             "pilot_call_type": str(call_type),
         })

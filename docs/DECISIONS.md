@@ -228,3 +228,32 @@ step stores only `input_delta`; the full request is kept once, in the raw proxy 
   tagged as development runs; they never enter the analysis and count
   against the $70 reserve. Only each system's single data run uses Sonnet
   5.5. Spec and tickets: `.scratch/pilot/`.
+
+## R-1 check results (ticket 01, 2026-10-27)
+
+From a Haiku development run of CyberGym's `claude-code` agent (Claude Code
+2.1.91) on `md4c/arvo_31332` through LiteLLM → OpenRouter (48 calls, $0.054
+actual) plus single test calls.
+
+1. **Summarized thinking: passes**, once `display` is set on the final
+   upstream body. Claude Code 2.1.91 sends the legacy `thinking: {type:
+   enabled, budget_tokens: 31999}`, which Sonnet 5.5 would reject. LiteLLM
+   rewrites it to `adaptive` after the pre-call hook, so the hook now sets
+   `display: summarized` after that rewrite. The client's original setting is
+   logged (`pilot_client_thinking`), and LiteLLM's rewrite counts as a
+   logged M-3 change. LiteLLM's reassembled streaming response drops the
+   thinking text, so the proxy keeps the raw stream events.
+2. **Refusal category: field passes, category unverified.** `stop_details`
+   arrives (null on normal calls). No refusal has occurred, and none will be
+   provoked; the category is confirmed when one occurs in a real run.
+3. **Cache and cost: pass.** Cache reads are reported (2.66M of 2.75M prompt
+   tokens in the development run), and OpenRouter reports its actual cost in
+   every streamed response's `message_delta` usage. Reports use OpenRouter's
+   figure; caps use LiteLLM's estimate from configured prices (for Haiku,
+   the >100k tier, so about 5× actual).
+4. **Claude Code through LiteLLM's Anthropic-format endpoint: passes**
+   (48/48 calls succeeded). Every call was served by Anthropic.
+
+Isolation (P1), checked from inside `cybergym-internal`: LiteLLM reachable
+through the gateway forwarder; `api.anthropic.com` and `openrouter.ai` denied
+by Squid (empty allowlist); Phoenix unreachable.
