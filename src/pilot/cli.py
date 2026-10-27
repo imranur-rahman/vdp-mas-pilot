@@ -8,6 +8,13 @@ from pathlib import Path
 from . import exporter, infra, runner
 
 
+def _run(a):
+    if a.system == "visa-vvah":
+        from .adapters import vvah
+        return vvah.run(a.task, a.kind, a.budget, a.timeout)
+    return runner.run_claude_code(a.task, a.kind, a.budget, a.timeout)
+
+
 def main():
     p = argparse.ArgumentParser(prog="pilot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -16,12 +23,12 @@ def main():
     up.set_defaults(fn=lambda a: print("proxy:", infra.ensure_proxy(infra.ensure_firewall())))
 
     run = sub.add_parser("run", help="run one system on one task")
-    run.add_argument("system", choices=["claude-code"])
+    run.add_argument("system", choices=["claude-code", "visa-vvah"])
     run.add_argument("task", help="CyberGym-E2E task, e.g. md4c/arvo_31332")
     run.add_argument("--kind", choices=["dev", "data"], required=True)
     run.add_argument("--budget", type=float, help="hard cap in USD (default: dev 2, data 20)")
     run.add_argument("--timeout", type=int, default=5400, help="agent timeout in seconds")
-    run.set_defaults(fn=lambda a: print("run folder:", runner.run_claude_code(a.task, a.kind, a.budget, a.timeout)))
+    run.set_defaults(fn=lambda a: print("run folder:", _run(a)))
 
     exp = sub.add_parser("export", help="build the trajectory bundle for a run folder (no Docker needed)")
     exp.add_argument("run_dir", type=Path)

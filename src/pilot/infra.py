@@ -11,7 +11,9 @@ import httpx
 REPO = Path(__file__).resolve().parents[2]
 CYBERGYM = REPO / "vendor" / "cybergym-e2e"
 CYBERGYM_SCRIPTS = CYBERGYM / "scripts"
-RUNS = REPO / "runs"
+# The proxy writes each run's log under the runs folder it has mounted; a
+# worktree that shares the running proxy sets PILOT_RUNS_DIR to that folder.
+RUNS = Path(os.environ.get("PILOT_RUNS_DIR") or REPO / "runs")
 PROXY_PORT = 4000
 # P1: the agent's only exit is the host gateway (LiteLLM). Squid needs at least
 # one entry, so the allowlist holds a name that can never resolve.
