@@ -68,6 +68,16 @@ Pinned at `f3162c0`. The fixed graph (`workflow.base.json`, committed here) is
   one turn hit it (`finish_reason: length`), so no finding reached the gate
   (30 calls, $0.53, isolation valid). Not for analysis.
 
+- **Data run `20261027T135230`** (the run of record; fixture in
+  tests/fixtures/runs): exit 0, 87 calls on 14 nodes, $1.29 (OpenRouter),
+  11 min, isolation `valid`, one gVisor sandbox on the task image (network
+  `none`). All four gates fired (`findings_gate` default route,
+  `reviewer_classifier` confirmed, `critic_classifier` viable,
+  `repro_classifier` success); 13 hand-offs, each with a knowledge-store copy
+  and tree diff; 14 sandbox executions, none a sanitizer crash; 79 of 87 calls
+  carry a thinking summary. 5 findings (`md4c-html.c` x4, `md2html.c` x1),
+  none at the known bug; no patch recorded, so CyberGym did not run.
+
 ### Known gaps (threats to validity)
 
 - **No CyberGym PoC from Mantis.** Its reproducer writes driver scripts that

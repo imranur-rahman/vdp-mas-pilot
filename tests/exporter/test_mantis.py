@@ -344,3 +344,35 @@ def test_a_finding_with_only_code_paths_names_its_function_and_keeps_its_repro_s
     assert f["poc"] is None
     assert (bundle / f["repro_script"]).read_text().startswith("#!/usr/bin/env python3")
     assert f["tp_target_check"] == {**f["tp_target_check"], "method": "location_overlap", "result": "fail"}
+
+
+# --- the real Mantis data run (tests/fixtures/runs, ticket 07) -----------------
+
+MANTIS_DATA = "20261027T135230-mantis-md4c_arvo_31332-data"
+
+
+@pytest.fixture(scope="module")
+def mantis_bundle(tmp_path_factory):
+    import shutil
+    run_dir = tmp_path_factory.mktemp("mantis") / MANTIS_DATA
+    shutil.copytree(FIXTURES / "runs" / MANTIS_DATA, run_dir)
+    return export(run_dir, tasks_dir=TASKS)
+
+
+def test_the_mantis_data_run_bundle_has_every_kind_of_step(mantis_bundle):
+    ss = steps(mantis_bundle)
+    kinds = {t: sum(s["step_type"] == t for s in ss) for t in ("llm_step", "code_decision", "handoff", "oracle_run")}
+    assert kinds == {"llm_step": 87, "code_decision": 4, "handoff": 13, "oracle_run": 14}
+    # every model call carries its graph node, joined from the ADK spans
+    assert all(s["role"] for s in ss if s["step_type"] == "llm_step")
+    assert {s["role"] for s in ss if s["step_type"] == "code_decision"} == \
+        {"findings_gate", "reviewer_classifier", "critic_classifier", "repro_classifier"}
+    assert all((s["state_ref"] or {}).get("db_snapshot") for s in ss if s["step_type"] == "handoff")
+    assert all(s["oracle_ref"]["source"] == "mantis_sandbox" for s in ss if s["step_type"] == "oracle_run")
+
+
+def test_the_mantis_data_run_findings_miss_the_known_bug(mantis_bundle):
+    fs = bundle_findings(mantis_bundle)
+    assert len(fs) == 5
+    assert all(f["tp_target_check"]["method"] == "location_overlap" for f in fs)
+    assert all(f["verdict"] is None for f in fs)  # left to coders (ADR 0004)
