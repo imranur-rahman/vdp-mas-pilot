@@ -155,6 +155,10 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
 
         state.capture(run_dir, "after-install", _capture_files(cg, cid, workspace),
                       from_role=None, to_role=ROLES[0][0], note="Workspace scaffolded; no model calls yet.")
+        # One key per command (D2), all in one team whose budget is the run's cap (D6).
+        keys = infra.mint_keys(run_id=run_id, kind=kind, system="deepsec", budget_usd=budget,
+                               roles=[r for r, _ in ROLES])
+        minted.extend(keys.values())
         cli = f"node {workspace}/node_modules/deepsec/dist/cli.mjs"
         common = ["--headless", "--no-tui", "--output", "jsonl"]
         for i, (role, args) in enumerate(ROLES, 1):
@@ -165,8 +169,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
                 commands.append({"role": role, "remaining_budget": remaining_budget,
                                  "skipped": "budget exhausted" if remaining_budget <= 0 else "time exhausted"})
                 break
-            key = infra.mint_key(run_id=run_id, kind=kind, system="deepsec", budget_usd=remaining_budget, role=role)
-            minted.append(key)
+            key = keys[role]
             argv = args + (common if args[0] == "setup" else []) + [
                 "--concurrency", str(CONCURRENCY), "--project-id", config["repo_to_patch"]]
             started = time.time()

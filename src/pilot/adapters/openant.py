@@ -252,8 +252,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     proxy_url = f"http://{gateway}:{infra.PROXY_PORT}"
 
     # D2/ADR 0002: one key per phase (role), all in one team whose budget is the run cap (D6).
-    phase_keys = infra.mint_role_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget,
-                                      roles=list(PHASES))
+    phase_keys = infra.mint_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget,
+                                 roles=list(PHASES))
     config = build_config(model, proxy_url, phase_keys)
     config_path = oa / "config.json"
     config_path.write_text(json.dumps(config, indent=2))

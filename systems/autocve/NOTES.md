@@ -43,7 +43,7 @@
   settings (`agentConfigs.<agent>.llmApiKey`): orchestrator, recon, scan,
   triage, finding, verification, analysis; `default` for code outside the
   agents (task report, managed-report generation). All keys belong to one
-  LiteLLM team whose budget is the run cap (`infra.mint_role_keys`).
+  LiteLLM team whose budget is the run cap (`infra.mint_keys`).
   Caveat: the `dataflow_analysis` tool is built with the orchestrator's LLM
   service, so its calls carry the `orchestrator` label; the prompt hash tells
   them apart.

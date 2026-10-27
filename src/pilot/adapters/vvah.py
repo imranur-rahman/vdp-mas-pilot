@@ -215,7 +215,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
 
     gateway = infra.ensure_firewall()
     _ensure_proxy(gateway)
-    key = infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget)
+    key = infra.mint_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget)[SYSTEM]
 
     infra._import_cybergym()
     import tomli

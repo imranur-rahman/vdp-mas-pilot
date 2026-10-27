@@ -76,19 +76,6 @@ def ensure_proxy(gateway_ip: str) -> str:
     raise RuntimeError("LiteLLM proxy did not become healthy")
 
 
-def mint_key(*, run_id: str, kind: str, system: str, budget_usd: float, role: str | None = None) -> str:
-    """A per-run virtual key; its metadata is how the proxy labels and routes calls."""
-    env = load_env()
-    meta = {"pilot_run_id": run_id, "pilot_run_kind": kind, "pilot_system": system}
-    if role:
-        meta["pilot_role"] = role
-    r = httpx.post(f"http://127.0.0.1:{PROXY_PORT}/key/generate", timeout=60,
-                   headers={"Authorization": f"Bearer {env['LITELLM_MASTER_KEY']}"},
-                   json={"key_alias": f"{run_id}:{role or system}", "max_budget": budget_usd, "metadata": meta})
-    r.raise_for_status()
-    return r.json()["key"]
-
-
 def key_spend(key: str) -> dict:
     env = load_env()
     r = httpx.get(f"http://127.0.0.1:{PROXY_PORT}/key/info", params={"key": key}, timeout=60,
@@ -98,12 +85,14 @@ def key_spend(key: str) -> dict:
     return {"spend": info.get("spend"), "max_budget": info.get("max_budget")}
 
 
-def mint_role_keys(*, run_id: str, kind: str, system: str, budget_usd: float, roles: list[str],
-                   base: str | None = None, master: str | None = None) -> dict[str, str]:
-    """One virtual key per role (D2), all in one LiteLLM team whose budget is the run's cap (D6).
+def mint_keys(*, run_id: str, kind: str, system: str, budget_usd: float, roles: list[str] | None = None,
+              base: str | None = None, master: str | None = None) -> dict[str, str]:
+    """A run's virtual keys: one LiteLLM team per run whose budget is the run's hard cap (D6).
 
-    Each key carries the role in its metadata, so the proxy log labels every
-    call with it; the team's budget caps the run's total spend across roles.
+    With `roles`, one key per role (D2), each carrying the role in its metadata
+    so the proxy log labels every call with it; without, one key under
+    `system`. Keys carry no budget of their own: the team's caps the run's
+    total spend across all of them.
     """
     base = base or f"http://127.0.0.1:{PROXY_PORT}"
     headers = {"Authorization": f"Bearer {master or load_env()['LITELLM_MASTER_KEY']}"}
@@ -112,10 +101,12 @@ def mint_role_keys(*, run_id: str, kind: str, system: str, budget_usd: float, ro
     r.raise_for_status()
     team = r.json()["team_id"]
     keys = {}
-    for role in roles:
-        meta = {"pilot_run_id": run_id, "pilot_run_kind": kind, "pilot_system": system, "pilot_role": role}
+    for role in roles or [None]:
+        meta = {"pilot_run_id": run_id, "pilot_run_kind": kind, "pilot_system": system}
+        if role:
+            meta["pilot_role"] = role
         r = httpx.post(f"{base}/key/generate", headers=headers, timeout=60,
-                       json={"key_alias": f"{run_id}:{role}", "team_id": team, "metadata": meta})
+                       json={"key_alias": f"{run_id}:{role or system}", "team_id": team, "metadata": meta})
         r.raise_for_status()
-        keys[role] = r.json()["key"]
+        keys[role or system] = r.json()["key"]
     return keys

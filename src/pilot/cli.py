@@ -89,7 +89,7 @@ def _export_with_claims(run_dir: Path, budget: float) -> Path:
     """Live claim extraction on a `tooling` key. Its proxy log goes to
     `<run folder>/claim-extraction/proxy.jsonl`, apart from the run's own log."""
     run_id = json.loads((run_dir / "run.json").read_text())["run_id"]
-    key = infra.mint_key(run_id=f"{run_id}/claim-extraction", kind="tooling", system="pilot-claims",
-                         budget_usd=budget, role="claim-extractor")
+    key = infra.mint_keys(run_id=f"{run_id}/claim-extraction", kind="tooling", system="pilot-claims",
+                          budget_usd=budget, roles=["claim-extractor"])["claim-extractor"]
     extractor = claims.proxy_extractor(f"http://127.0.0.1:{infra.PROXY_PORT}", key)
     return exporter.export(run_dir, extractor=extractor)

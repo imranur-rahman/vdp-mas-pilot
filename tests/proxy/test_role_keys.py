@@ -1,5 +1,5 @@
-"""Per-role keys that share one run budget (D2, D6), for systems with per-role
-model settings (AutoCVE's agentConfigs, ticket 10)."""
+"""Run keys (`infra.mint_keys`): one LiteLLM team per run whose budget is the
+run's hard cap (D6), with one key per role (D2) or a single key."""
 
 import time
 
@@ -12,7 +12,7 @@ from .test_proxy import messages
 
 
 def test_each_role_key_labels_its_calls(proxy, upstream):
-    keys = infra.mint_role_keys(run_id="t-roles", kind="dev", system="autocve", budget_usd=1,
+    keys = infra.mint_keys(run_id="t-roles", kind="dev", system="autocve", budget_usd=1,
                                 roles=["recon", "finding"], base=proxy["base"], master=proxy["master"])
     assert messages(proxy, keys["finding"]).status_code == 200
     assert messages(proxy, keys["recon"]).status_code == 200
@@ -22,7 +22,7 @@ def test_each_role_key_labels_its_calls(proxy, upstream):
 
 
 def test_role_keys_share_the_run_cap(proxy, upstream):
-    keys = infra.mint_role_keys(run_id="t-roles-cap", kind="dev", system="autocve",
+    keys = infra.mint_keys(run_id="t-roles-cap", kind="dev", system="autocve",
                                 budget_usd=CAP_BELOW_ONE_CALL, roles=["recon", "finding"],
                                 base=proxy["base"], master=proxy["master"])
     assert messages(proxy, keys["recon"]).status_code == 200  # spend starts at 0
@@ -36,3 +36,16 @@ def test_role_keys_share_the_run_cap(proxy, upstream):
     while run_outcome(run_dir)["outcome"] != "budget_exhausted":
         assert time.time() < deadline, run_outcome(run_dir)
         time.sleep(0.5)
+
+
+def test_a_run_without_roles_gets_one_unlabelled_key_under_the_run_cap(proxy, upstream):
+    keys = infra.mint_keys(run_id="t-single-cap", kind="dev", system="claude-code",
+                           budget_usd=CAP_BELOW_ONE_CALL, base=proxy["base"], master=proxy["master"])
+    assert list(keys) == ["claude-code"]
+    deadline = time.time() + 30
+    while (r := messages(proxy, keys["claude-code"])).status_code == 200:
+        assert time.time() < deadline, "the run cap never fired"
+        time.sleep(0.5)
+    assert "budget" in r.text.lower()
+    recs = [r for r in wait_for_log(proxy["runs"] / "t-single-cap" / "proxy.jsonl") if r["record"] == "call"]
+    assert "pilot_role" not in recs[0]["pilot"]

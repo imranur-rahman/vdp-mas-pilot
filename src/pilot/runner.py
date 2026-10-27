@@ -57,9 +57,9 @@ def run_claude_code(task: str, kind: str, budget_usd: float | None, timeout_s: i
     minted: list[str] = []
 
     def mint(max_budget, key_alias):  # replaces run_agent.litellm_generate_api_key
-        key = infra.mint_key(run_id=run_id, kind=kind, system="claude-code", budget_usd=budget)
-        minted.append(key)
-        return key
+        if not minted:  # one key per run, so a second request cannot get a second cap
+            minted.append(infra.mint_keys(run_id=run_id, kind=kind, system="claude-code", budget_usd=budget)["claude-code"])
+        return minted[0]
 
     import os
     os.environ.update({
@@ -149,7 +149,7 @@ def run_claude_code_in_runner(task: str, kind: str, budget_usd: float | None, ti
     repo = _prepare_source(task, workspace / "src")
     (workspace / "output").mkdir()
     subprocess.run(["chmod", "-R", "a+rwX", str(workspace)], check=True)  # the agent user writes here
-    key = infra.mint_key(run_id=run_id, kind=kind, system=system, budget_usd=budget)
+    key = infra.mint_keys(run_id=run_id, kind=kind, system=system, budget_usd=budget)[system]
 
     infra._import_cybergym()
     from run_agent import get_prompt_no_test

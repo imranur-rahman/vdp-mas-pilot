@@ -152,9 +152,9 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     gateway = infra.ensure_firewall()
     infra.ensure_proxy(gateway)
     # One key per role (distinct alias, same run id) so the proxy labels finder
-    # vs grader vs the rest (D2) while still logging to one proxy.jsonl per run.
-    keys = {role: infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM,
-                                 budget_usd=budget, role=role) for role in KEY_ROLES}
+    # vs grader vs the rest (D2) while still logging to one proxy.jsonl per run,
+    # all in one team whose budget is the run's cap (D6), so the roles share it.
+    keys = infra.mint_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget, roles=list(KEY_ROLES))
 
     meta = {
         "run_id": run_id, "system": SYSTEM, "task": task, "kind": kind,

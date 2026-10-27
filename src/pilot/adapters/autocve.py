@@ -348,7 +348,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     runner._prepare_source(task, source)
     for d in ("db", "tmp"):
         (work / d).mkdir(parents=True)
-    keys = infra.mint_role_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget, roles=list(ROLES))
+    keys = infra.mint_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget, roles=list(ROLES))
     subprocess_chmod(run_dir)
 
     cmd = ["/app/.venv/bin/python", "/opt/pilot/autocve_start.py", "--work-dir", str(work),

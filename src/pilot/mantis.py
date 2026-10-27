@@ -266,7 +266,7 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
     (work / "workflow.json").write_text(json.dumps(wf, indent=2))
     subprocess.run(["chmod", "-R", "a+rwX", str(work)], check=True)
 
-    key = infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget)
+    key = infra.mint_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget)[SYSTEM]
     cmd = ["python3", "main.py", f"/src/{repo}", "--workflow", "/work/workflow.json",
            "--db", "/output/knowledge.sqlite", "--max-time", f"{max(timeout_s // 60 - 5, 5)}m"]
     env = {"OPENAI_API_KEY": key, "MANTIS_SESSIONS_DB": "/output/sessions.sqlite",
