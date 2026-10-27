@@ -76,14 +76,20 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
 
     records = load_proxy_log(run_dir)
     llm = _llm_steps(records, bundle)
+    # Adapter-supplied steps that are anchored in time (hand-offs and a system's
+    # own grader re-runs) interleave with the model calls; CyberGym's validation
+    # runs after the whole run, so its oracle steps go at the end.
+    timed = _handoff_steps(run_dir, bundle) + _collector_oracle_steps(run_dir, bundle)
     attempts, oracle = _oracle_steps(run_dir, bundle)
     iteration = attempts[-1] if attempts else 1
-    steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in llm]
+    steps = [{**_empty_step(), **base, "iteration": iteration, **s}
+             for s in _merge_by_time(llm, timed)]
     steps += [{**_empty_step(), **base, **s} for s in oracle]
     for seq, s in enumerate(steps, 1):
         s["seq"] = seq
         s["step_id"] = f"s{seq:04d}"
     _link_parents(steps)
+    run = {**run, "native_traces": _join_transcripts(run_dir, bundle, steps)}
     run = {**run, "stage_map": stages.join_stages(steps, stages.load_map(stage_map))}
     run["claims"] = claims.extract(steps, run_dir, bundle, extractor)
 
@@ -316,6 +322,110 @@ def _link_parents(steps: list[dict]) -> None:
             s["parent_step_id"] = last_llm
 
 
+# --- collector hand-offs and grader re-runs -----------------------------------
+
+def _handoff_steps(run_dir: Path, bundle: Path) -> list[dict]:
+    """One `handoff` step per record in a collector's `handoffs.jsonl`: a state
+    hand-off from one agent to the next. The hand-off files are copied so the
+    bundle stands alone."""
+    path = run_dir / "handoffs.jsonl"
+    if not path.exists():
+        return []
+    steps = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        h = json.loads(line)
+        for f in h.get("files") or []:
+            src = run_dir / f["path"]
+            if src.is_file():
+                (bundle / f["path"]).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, bundle / f["path"])
+        steps.append({
+            "step_type": "handoff",
+            "role": h.get("from_role"),
+            "output": h.get("note"),
+            "ts_start": h.get("ts"),
+            "ts_end": h.get("ts"),
+            "state_ref": {k: h.get(k) for k in ("seq", "label", "from_role", "to_role", "files", "note")},
+        })
+    return steps
+
+
+def _collector_oracle_steps(run_dir: Path, bundle: Path) -> list[dict]:
+    """One `oracle_run` step per record in a collector's `oracle_runs.jsonl`: a
+    system's own executable-oracle run (e.g. the harness grader re-running the
+    PoC, or its patch grader's T0-T2 + re-attack tiers)."""
+    path = run_dir / "oracle_runs.jsonl"
+    if not path.exists():
+        return []
+    steps = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        o = json.loads(line)
+        for key in ("poc_ref", "patch_ref"):
+            ref = o.get(key)
+            if ref and (run_dir / ref).is_file():
+                (bundle / ref).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(run_dir / ref, bundle / ref)
+        steps.append({
+            "step_type": "oracle_run",
+            "role": o.get("role"),
+            "output": o.get("result"),
+            "ts_start": o.get("ts"),
+            "ts_end": o.get("ts"),
+            "oracle_ref": {"source": "harness_grader", "role": o.get("role"), "kind": o.get("kind"),
+                           "poc": o.get("poc_ref"), "patch": o.get("patch_ref"), "note": o.get("note")},
+        })
+    return steps
+
+
+def _join_transcripts(run_dir: Path, bundle: Path, steps: list[dict]) -> list[dict]:
+    """Join a collector's native Claude Code transcripts (`transcripts.jsonl`) to
+    the model-call steps: copy each into the bundle, and give every model call
+    the agent-instance id of the same-role transcript that was open when it ran,
+    so two instances of the same role stay distinct (spec story 31). Returns the
+    native-trace index for `run.json`."""
+    path = run_dir / "transcripts.jsonl"
+    if not path.exists():
+        return []
+    index = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    for t in index:
+        src = run_dir / t["path"]
+        if src.is_file():
+            (bundle / t["path"]).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, bundle / t["path"])
+    by_role: dict[str, list[dict]] = {}
+    for t in sorted(index, key=lambda t: t.get("ts") or 0):
+        by_role.setdefault(t["role"], []).append(t)
+    for s in steps:
+        if s["step_type"] not in ("llm_step", "refusal"):
+            continue
+        candidates = by_role.get(s["role"]) or []
+        chosen = None
+        for t in candidates:
+            if s["ts_start"] is None or t.get("ts") is None or t["ts"] <= s["ts_start"] + 1:
+                chosen = t
+        if chosen is None and candidates:
+            chosen = candidates[0]
+        if chosen is not None:
+            tag = chosen.get("session_id") or f"run{chosen.get('run_idx')}"
+            s["agent_instance_id"] = f"{s['role']}:{tag}"
+    return index
+
+
+def _merge_by_time(primary: list[dict], extra: list[dict]) -> list[dict]:
+    """Each extra (time-anchored) step goes before the first primary step that
+    started after it. Extras with no timestamp sort to the front."""
+    out, pending = [], sorted(extra, key=lambda s: s["ts_start"] if s["ts_start"] is not None else -1)
+    for s in primary:
+        while pending and s["ts_start"] is not None and (pending[0]["ts_start"] or -1) <= s["ts_start"]:
+            out.append(pending.pop(0))
+        out.append(s)
+    return out + pending
+
+
 # --- CyberGym validation ------------------------------------------------------
 
 def _oracle_steps(run_dir: Path, bundle: Path) -> tuple[list[int], list[dict]]:
@@ -395,6 +505,19 @@ def render(run: dict, steps: list[dict], bundle: Path | None = None, findings: l
 
 
 def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str]) -> list[str]:
+    if s["step_type"] == "handoff":
+        ref = s["state_ref"] or {}
+        files = ", ".join(_link(f["path"]) for f in ref.get("files") or []) or "none"
+        return [f"## Step {s['seq']} · handoff · {ref.get('label')}:"
+                f" {ref.get('from_role')} -> {ref.get('to_role') or 'end of run'}", "",
+                f"_{_when(s['ts_start'])}_. {ref.get('note') or ''}", "",
+                f"- Files: {files}", ""]
+    if s["step_type"] == "oracle_run" and (s["oracle_ref"] or {}).get("source") == "harness_grader":
+        ref = s["oracle_ref"]
+        return [f"## Step {s['seq']} · oracle_run · harness {ref.get('role')} ({ref.get('kind')})", "",
+                f"_{_when(s['ts_start'])}_. {ref.get('note') or ''}", "",
+                f"Result: {_fence(json.dumps(s['output'], indent=2), 'json')}", "",
+                f"- PoC: {_link(ref.get('poc'))}", f"- Patch: {_link(ref.get('patch'))}", ""]
     if s["step_type"] == "oracle_run":
         ref = s["oracle_ref"] or {}
         out = [f"## Step {s['seq']} · oracle_run · CyberGym stage {ref.get('stage')}"
