@@ -75,7 +75,9 @@
   `poc_code` text, written verbatim to `poc.bin`, run with CyberGym stage 1
   alone; its output is the stack trace. `tp_target` = stage 1 passed and the
   trace overlaps the functions in `patch.diff` (F-1). A completed run with no
-  finding gets outcome `out_of_scope` with evidence (D8).
+  finding keeps outcome `completed`; the D8 evidence goes to `scope_evidence`
+  (`out_of_scope: false`). Until 2026-10-27 such a run was labelled
+  `out_of_scope`; the four runs below were, and the data run was relabelled.
 
 ## Pilot runs (md4c/arvo_31332, Claude Haiku 5.5)
 
@@ -84,7 +86,7 @@
 | 20261027T093421 dev | failed: SQLite "database is locked" (fixed: WAL + busy timeout) | 0 | 13 | $0.07 / $0.01 | out_of_scope | valid |
 | 20261027T130754 dev | completed (output adapter re-run after the WAL read fix) | 0 | 42 | $0.78 / $0.16 | out_of_scope | valid |
 | 20261027T133641 dev | completed | 0 | 29 | $0.54 / $0.11 | out_of_scope | valid |
-| 20261027T134856 data | completed, 200 s | 0 | 24 | $0.34 / $0.07 | out_of_scope | valid |
+| 20261027T134856 data | completed, 200 s | 0 | 24 | $0.34 / $0.07 | completed (was out_of_scope) | valid |
 
 D8 evidence (data run): every stage ran (recon, finding, deterministic scan,
 triage, verification). Recon identified C; the finding agent loaded the
@@ -93,4 +95,6 @@ triage, verification). Recon identified C; the finding agent loaded the
 vulnerability meeting the CVE bar"); it never reached `md_is_container_mark`.
 Semgrep found nothing (registry rules unreachable offline), so triage and
 verification had no input and no PoC was ever run. AutoCVE works on C source
-but produced nothing on this task: `out_of_scope` by the D8 rule.
+but produced nothing on this task. D8 (pilot report, 2026-10-27): AutoCVE
+stays in the study; the run is `completed` with 0 findings. Offline Semgrep
+(no registry rule packs) is a threat to validity.

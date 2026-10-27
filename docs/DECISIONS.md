@@ -12,7 +12,7 @@ the date, and the reason in place; do not delete the question.
 | D5 | When to snapshot artifacts | **settled** | At every hand-off and at the end of the run; differences between captures for files, a copy of the database file for databases (round 3) |
 | D6 | Model and budget | **settled** | Claude Haiku 5.5 everywhere (P4, ADR 0005; was Sonnet 5.5 until 2026-10-27). Total pilot budget $200: T1 smoke test $10; one run per system at a hard cap of $20 ($120); $70 reserve for re-runs; no repeated runs in the pilot. A capped run ends `budget_exhausted`. Claim extraction (our tooling) uses Claude Haiku 5.5 |
 | D7 | Scoring and false positives | **settled** | Superseded by F-1 below: verdicts per finding, plus step coding in every run |
-| D8 | deepsec and AutoCVE on C/C++ | **pilot decides** | Run all six on the pilot task; a system that produces nothing on C gets outcome `out_of_scope`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
+| D8 | deepsec and AutoCVE on C/C++ | **settled** (2026-10-27, pilot report) | **Both stay in the study.** deepsec generated C matchers and investigated C files (17 findings, 10 in `src/md4c.c`). AutoCVE ran every stage on C and found nothing: outcome `completed` with 0 findings, not `out_of_scope` (that outcome means the system does not support the task's language). Threat to validity: AutoCVE's Semgrep runs offline without its registry rule packs. Evidence: `docs/pilot-report.md`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
 
 ## Settled principles (grilling round 1, 2026-10-26)
 
@@ -309,6 +309,11 @@ the team's own Anthropic key (BYOK) or calls go to Anthropic directly.
   else `refused` if the run's last model call was refused; else
   `completed`. `out_of_scope` is set by adapters. Refusals that the system
   got past are listed but do not change the outcome.
+- **Fifth outcome `adapter_error` (2026-10-27, user decision):** the run was
+  stopped by our adapter (setup, install, or harness code), not by the system
+  or the model. Set by adapters (deepsec's first). Such a run is re-run, not
+  coded. A run that ran but found nothing is `completed`, never `out_of_scope`
+  (AutoCVE data run, relabelled with the old value in `outcome.outcome_note`).
 - **Caps are checked before each call** (LiteLLM key `max_budget`, priced
   from `config.yaml`, about 1.5-5x OpenRouter's actual cost). A run can
   overshoot by the calls already in flight: in the capped demo the key

@@ -71,7 +71,7 @@ The judgement on one finding: `tp_target` (the task's known bug), `tp_other` (a 
 _Avoid_: score, label (labels are failure-mode codes on steps)
 
 **Run outcome**:
-How a run ended, for reasons outside the system's design: `completed`, `refused` (model refusal), `budget_exhausted`, or `out_of_scope` (the system does not support the task's language). Only `completed` runs are coded for failure modes, though every run is reported.
+How a run ended, for reasons outside the system's design: `completed`, `refused` (model refusal), `budget_exhausted`, `out_of_scope` (the system does not support the task's language; a run that ran on the language and found nothing is `completed`), or `adapter_error` (our adapter stopped the run, not the system; re-run, not coded). Only `completed` runs are coded for failure modes, though every run is reported.
 _Avoid_: status, result
 
 **Symptom**:
