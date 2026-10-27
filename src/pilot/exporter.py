@@ -88,11 +88,14 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
     agent_steps = _with_handoffs(llm, _handoff_steps(run_dir, bundle) + _collector_oracle_steps(run_dir, bundle))
     steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in agent_steps]
     steps += [{**_empty_step(), **base, **s} for s in oracle]
+    steps += [{**_empty_step(), **base, "iteration": iteration, **s}
+              for s in _collector_steps(run_dir, bundle)]
     for seq, s in enumerate(steps, 1):
         s["seq"] = seq
         s["step_id"] = f"s{seq:04d}"
     _link_parents(steps)
-    run = {**run, "native_traces": _join_transcripts(run_dir, bundle, steps)}
+    adk = _join_native_traces(steps, run_dir)
+    run = {**run, "native_traces": _join_transcripts(run_dir, bundle, steps) + adk}
     run = {**run, "stage_map": stages.join_stages(steps, stages.load_map(stage_map))}
     run["claims"] = claims.extract(steps, run_dir, bundle, extractor)
 
@@ -200,7 +203,13 @@ def _request_of(call: dict, requests: dict[str, dict]) -> dict:
     Logs from before that record keep only the messages and tools, in LiteLLM's
     own logging object."""
     if call.get("upstream_request"):
-        return call["upstream_request"]
+        body = call["upstream_request"]
+        if isinstance(body, str):  # OpenAI-route calls log the upstream body as JSON text
+            try:
+                body = json.loads(body)
+            except ValueError:
+                return {}
+        return body
     if call.get("litellm_call_id") in requests:
         return requests[call["litellm_call_id"]]
     slo = call.get("standard_logging_object") or {}
@@ -281,6 +290,9 @@ def _reassemble(stream: dict | None, call: dict) -> dict:
     LiteLLM's reassembled response drops thinking and stop details, so the
     stream is the source. Events are byte chunks, not lines: join them first.
     """
+    if any(isinstance(e, dict) and e.get("object") == "chat.completion.chunk"
+           for e in (stream or {}).get("events") or []):
+        return _from_chunks(stream["events"])
     msg = {"content": [], "stop_reason": None, "stop_details": None, "usage": {}, "model": None}
     blocks: dict[int, dict] = {}
     partial_json: dict[int, str] = {}
@@ -325,6 +337,56 @@ def _reassemble(stream: dict | None, call: dict) -> dict:
     if not stream:  # non-streamed call: fall back to LiteLLM's response
         msg.update(_from_litellm_response(call))
     return msg
+
+
+FINISH_TO_STOP = {"tool_calls": "tool_use", "stop": "end_turn", "length": "max_tokens",
+                  "content_filter": "refusal", "function_call": "tool_use"}
+
+
+def _from_chunks(events: list) -> dict:
+    """An OpenAI-format stream (`chat.completion.chunk` dicts, as LiteLLM streams
+    `/chat/completions`) rebuilt as Anthropic content blocks: thinking from
+    `reasoning_content`, text, and tool calls assembled by index. Usage and
+    OpenRouter's cost come from the last chunk that carries them."""
+    thinking, text, tools, finish, usage, model = [], [], {}, None, {}, None
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        model = model or e.get("model")
+        if e.get("usage"):
+            usage = e["usage"]
+        for ch in e.get("choices") or []:
+            finish = ch.get("finish_reason") or finish
+            d = ch.get("delta") or {}
+            if d.get("reasoning_content"):
+                thinking.append(d["reasoning_content"])
+            if d.get("content"):
+                text.append(d["content"])
+            for tc in d.get("tool_calls") or []:
+                t = tools.setdefault(tc.get("index", 0), {"id": None, "name": None, "args": ""})
+                fn = tc.get("function") or {}
+                t["id"] = tc.get("id") or t["id"]
+                t["name"] = fn.get("name") or t["name"]
+                t["args"] += fn.get("arguments") or ""
+    content = []
+    if thinking:
+        content.append({"type": "thinking", "thinking": "".join(thinking)})
+    if text:
+        content.append({"type": "text", "text": "".join(text)})
+    for i in sorted(tools):
+        t = tools[i]
+        try:
+            args = json.loads(t["args"]) if t["args"] else {}
+        except ValueError:
+            args = {"_unparsed": t["args"]}
+        content.append({"type": "tool_use", "id": t["id"], "name": t["name"], "input": args})
+    details = usage.get("prompt_tokens_details") or {}
+    return {"content": content, "model": model, "stop_details": None,
+            "stop_reason": FINISH_TO_STOP.get(finish, finish),
+            "usage": {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens"),
+                      "cache_read_input_tokens": usage.get("cache_read_input_tokens", details.get("cached_tokens")),
+                      "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+                      "cost": usage.get("cost")}}
 
 
 def _from_litellm_response(call: dict) -> dict:
@@ -384,7 +446,7 @@ def _link_parents(steps: list[dict]) -> None:
         if agent is not None:
             s["parent_step_id"] = last_of_agent.get(agent)
             last_of_agent[agent] = last_llm = s["step_id"]
-        elif s["step_type"] == "oracle_run":
+        elif s["step_type"] in ("oracle_run", "code_decision", "handoff"):
             s["parent_step_id"] = last_llm
 
 
@@ -542,6 +604,76 @@ def _copy_first(bundle: Path, dest: str, *candidates: Path) -> str | None:
             shutil.copyfile(src, bundle / dest)
             return dest
     return None
+
+
+# --- Layer-2 collector: sandbox runs and native-trace roles -------------------
+# Hand-offs and code decisions come from the run-root `handoffs.jsonl` (above).
+# `<run>/collector/oracle_runs.jsonl` holds PoC/commands a system ran in its own
+# sandbox (oracle_run); `collector/adk_spans.jsonl` holds native agent spans.
+# A run without `collector/` gets neither, so other bundles are unchanged.
+
+def _join_native_traces(steps: list[dict], run_dir: Path) -> list[dict]:
+    """Set each model call's `role` and `agent_instance_id` from the ADK agent
+    span that produced it (D2, bundle native traces).
+
+    A span is matched to a call by `litellm_call_id`/`call_id` when the trace
+    carries it, else by order among the model-call steps. A run with no
+    `collector/adk_spans.jsonl` is left untouched (the proxy's own role label,
+    or the prompt hash, stands)."""
+    spans = _read_jsonl(Path(run_dir) / "collector" / "adk_spans.jsonl")
+    if not spans:
+        return []
+    by_call = {s.get("call_id") or s.get("litellm_call_id"): s for s in spans if
+               s.get("call_id") or s.get("litellm_call_id")}
+    calls = [s for s in steps if s["step_type"] in ("llm_step", "refusal")]
+    joined = 0
+    for i, step in enumerate(calls):
+        span = by_call.get(step.get("litellm_call_id")) or (spans[i] if i < len(spans) else None)
+        if span is None:
+            continue
+        role = span.get("role") or span.get("name")
+        if not role:
+            continue
+        step["role"] = role
+        step["agent_instance_id"] = f"{role}:{step.get('prompt_id')}"
+        joined += 1
+    return [{"kind": "adk_spans", "path": "collector/adk_spans.jsonl", "spans": len(spans),
+             "joined_model_calls": joined}]
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+
+def _collector_steps(run_dir: Path, bundle: Path) -> list[dict]:
+    collector = Path(run_dir) / "collector"
+    steps = [_sandbox_step(r) for r in _read_jsonl(collector / "oracle_runs.jsonl")]
+    steps.sort(key=lambda s: (s["ts_start"] if s["ts_start"] is not None else 0))
+    return steps
+
+
+
+def _sandbox_step(r: dict) -> dict:
+    """A PoC/command the reproducer ran in the gVisor sandbox (oracle_run)."""
+    ts_start, ts_end = _ts(r.get("ts_start")), _ts(r.get("ts_end"))
+    crashed = r.get("crashed")
+    return {
+        "step_type": "oracle_run",
+        "output": f"exit {r.get('exit_code')}" + (f", crashed: {crashed}" if crashed is not None else ""),
+        "oracle_ref": {
+            "source": "mantis_sandbox",
+            "tool": r.get("tool"),
+            "command": r.get("command"),
+            "exit_code": r.get("exit_code"),
+            "crashed": crashed,
+            "stdout": r.get("stdout_ref"),
+            "stderr": r.get("stderr_ref"),
+        },
+        "latency_ms": round((ts_end - ts_start) * 1000) if ts_start and ts_end else None,
+        "ts_start": ts_start, "ts_end": ts_end,
+    }
 
 
 # --- rendering ----------------------------------------------------------------

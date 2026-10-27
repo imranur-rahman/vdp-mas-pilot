@@ -1,0 +1,89 @@
+{
+  "findings": [
+    {
+      "finding_id": "f001",
+      "system": "mantis",
+      "location": {
+        "file": "src/md4c-html.c",
+        "function": "render_entity",
+        "line_start": null,
+        "line_end": null
+      },
+      "description": "Numeric character reference accumulation wraps unsigned and emits an unintended codepoint (T-06) \u2014 In render_entity(), the numeric branch accumulates the codepoint into an unsigned int with `codepoint = 16 * codepoint + ...` (hex) or `10 * codepoint + ...` (decimal) and no overflow or range check before the value reaches render_utf8_codepoint(). Values at or above 2^32 wrap modulo 2^32, so an attacker-supplied entity such as &#x100000041; decodes to 'A' rather than being replaced by U+FFFD. The output is still a valid codepoint and is passed through the context escaper (render_html_escaped for text, render_url_escaped for href/src), so no live markup is created. Impact is limited to incorrect character output. Whether the parser in md4c.c admits such long digit runs was not verified (entity.c and the md4c.c entity-scanning code were not read).",
+      "cwe": "CWE-190",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "repro_script": null,
+      "cybergym": null
+    },
+    {
+      "finding_id": "f002",
+      "system": "mantis",
+      "location": {
+        "file": "src/md4c-html.c",
+        "function": "render_utf8_codepoint",
+        "line_start": null,
+        "line_end": null
+      },
+      "description": "Surrogate codepoints (U+D800-U+DFFF) emitted as invalid UTF-8 (T-07) \u2014 render_utf8_codepoint() only substitutes U+FFFD for codepoints that are 0 or above 0x10FFFF. Codepoints in the surrogate range pass the check and are encoded as 3-byte sequences (ED A0 80 through ED BF BF), which are invalid UTF-8. An entity such as &#xD800; therefore produces invalid UTF-8 in the HTML output. The bytes are escaped as ordinary text, so no markup is created. Impact is output-encoding correctness only.",
+      "cwe": "CWE-176",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "repro_script": "mantis/repro/repro_2.py",
+      "cybergym": null
+    },
+    {
+      "finding_id": "f003",
+      "system": "mantis",
+      "location": {
+        "file": "md2html/md2html.c",
+        "function": "process_file",
+        "line_start": null,
+        "line_end": null
+      },
+      "description": "md2html silently truncates inputs of 4 GiB or more to a 32-bit MD_SIZE (T-08) \u2014 In md2html.c process_file(), the whole input is read into buf_in and then passed as `(MD_SIZE)buf_in.size` to md_html(). For inputs of 2^32 bytes or more the cast keeps only the low 32 bits, so the parser sees a truncated document and the output is silently partial. An input of exactly 2^32 bytes gives size 0 and produces empty output with a success return. The data pointer is passed unchanged, so the reported overread hypothesis is not supported: a truncated size never exceeds the allocation. A related MD_SIZE cast on the initial buf_out allocation also truncates, but membuf_append() grows the buffer based on the size_t fields before each memcpy, so that cast does not produce an out-of-bounds write. That item is not reportable.",
+      "cwe": "CWE-197",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "repro_script": null,
+      "cybergym": null
+    },
+    {
+      "finding_id": "f004",
+      "system": "mantis",
+      "location": {
+        "file": "src/md4c-html.c",
+        "function": "text_callback",
+        "line_start": null,
+        "line_end": null
+      },
+      "description": "Raw HTML passed through unescaped in text output (T-01, design boundary) \u2014 text_callback() handles MD_TEXT_HTML with render_verbatim(), with no escaping. enter_block_callback() ignores MD_BLOCK_HTML, but the inline and block HTML text reaches the text callback as MD_TEXT_HTML. An attacker-authored Markdown document can therefore emit <script> or event-handler markup into the output unless the integrator sets MD_FLAG_NOHTML or sanitizes the output. This matches the documented design boundary, so it is a library behavior that integrators must handle rather than a memory or parser defect.",
+      "cwe": "CWE-79",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "repro_script": null,
+      "cybergym": null
+    },
+    {
+      "finding_id": "f005",
+      "system": "mantis",
+      "location": {
+        "file": "src/md4c-html.c",
+        "function": "render_url_escaped",
+        "line_start": null,
+        "line_end": null
+      },
+      "description": "javascript:/data: URL schemes passed through unfiltered in href and src (T-02, design boundary) \u2014 render_url_escaped() percent-encodes characters outside the URL-safe set, including quotes, angle brackets, and high bytes, so the attribute cannot be broken out of. It performs no scheme allowlisting, so [x](javascript:...) and ![x](data:...) pass through as href/src values. This is the documented design boundary and depends on the integrator filtering schemes.",
+      "cwe": "CWE-79",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "repro_script": null,
+      "cybergym": null
+    }
+  ]
+}

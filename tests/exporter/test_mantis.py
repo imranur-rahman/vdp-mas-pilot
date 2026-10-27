@@ -1,0 +1,378 @@
+"""Seam 2 for the Mantis adapter: what the Layer-2 collector leaves in the run
+folder becomes bundle steps and findings.
+
+The proxy cannot see Mantis's code-side classifier gates, its ADK agent
+boundaries, the SQLite knowledge store it hands between nodes, or the PoCs its
+reproducer runs in the gVisor sandbox. The adapter's collector writes those to
+the run folder; here we feed a synthetic Mantis run folder to the exporter and
+check the bundle:
+
+- the SQLite findings store normalizes to `findings.json` (F-1);
+- each classifier gate is a `code_decision` step;
+- each knowledge-store hand-off is a `handoff` step with a `state_ref`;
+- each sandbox PoC run is an `oracle_run` step;
+- ADK spans give each model call its node name as `role`.
+
+No Mantis code, no Docker, no model calls: the collector output is fixed data.
+"""
+
+import json
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from pilot import mantis
+from pilot.exporter import export
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+TASKS = FIXTURES / "tasks"
+
+# The columns of Mantis's `findings` table the normalizer reads
+# (reference/core/database.py, re-checked at f3162c0).
+FINDINGS_SCHEMA = """
+CREATE TABLE findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT,
+    filepath TEXT,
+    title TEXT,
+    severity TEXT,
+    description TEXT,
+    line_numbers TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'reported',
+    cwe TEXT,
+    patch_diff TEXT,
+    patch_status TEXT,
+    rca_summary TEXT,
+    signature TEXT,
+    lineage_id TEXT,
+    code_paths TEXT NOT NULL DEFAULT '[]'
+)
+"""
+
+
+def mantis_db(path: Path, rows: list[dict]) -> Path:
+    conn = sqlite3.connect(path)
+    conn.execute(FINDINGS_SCHEMA)
+    for r in rows:
+        cols = ", ".join(r)
+        conn.execute(f"INSERT INTO findings ({cols}) VALUES ({', '.join('?' for _ in r)})",
+                     tuple(r.values()))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def run_folder(tmp_path) -> Path:
+    run_dir = tmp_path / "20261027T120000-mantis-md4c_arvo_31332-dev"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(json.dumps({
+        "run_id": run_dir.name, "system": "mantis", "task": "md4c/arvo_31332", "kind": "dev",
+        "requested_model": "claude-haiku-5-5", "outcome": {"outcome": "completed"},
+    }))
+    return run_dir
+
+
+def bundle_findings(bundle: Path) -> list[dict]:
+    return json.loads((bundle / "findings.json").read_text())["findings"]
+
+
+def steps(bundle: Path) -> list[dict]:
+    return [json.loads(l) for l in (bundle / "steps.jsonl").read_text().splitlines()]
+
+
+def of_type(bundle: Path, step_type: str) -> list[dict]:
+    return [s for s in steps(bundle) if s["step_type"] == step_type]
+
+
+def write_collector(run_dir: Path, name: str, *records: dict) -> None:
+    path = run_dir / mantis.COLLECTOR / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+# --- finding normalization -----------------------------------------------------
+
+def test_a_knowledge_store_finding_with_a_patch_becomes_a_normalized_finding(tmp_path):
+    run_dir = run_folder(tmp_path)
+    db = mantis_db(run_dir / "knowledge.sqlite", [{
+        "filepath": "src/md4c.c", "title": "Heap buffer overflow",
+        "description": "Missing bounds check in md_is_container_mark",
+        "line_numbers": json.dumps([5685, 5690]), "cwe": "CWE-122",
+        "patch_diff": "--- a/src/md4c.c\n+++ b/src/md4c.c\n@@ -5685,1 +5685,2 @@\n+  if (off >= size) return 0;\n",
+        "patch_status": "applied", "status": "reported",
+    }])
+
+    mantis.write_findings(run_dir, db)
+    bundle = export(run_dir, tasks_dir=TASKS)
+    (f,) = bundle_findings(bundle)
+
+    assert f["system"] == "mantis"
+    assert f["location"]["file"] == "src/md4c.c"
+    assert f["location"]["line_start"] == 5685 and f["location"]["line_end"] == 5690
+    assert "md_is_container_mark" in f["description"]
+    assert f["patch"] and (bundle / f["patch"]).read_text().startswith("--- a/src/md4c.c")
+    assert f["poc"] is None
+
+
+# --- classifier gates and hand-offs (run-root handoffs.jsonl, ticket 05 format)
+
+def test_mantis_gates_and_handoffs_become_code_decision_and_handoff_steps(tmp_path):
+    run_dir = run_folder(tmp_path)
+    snap = run_dir / "state/0001-researcher-knowledge.sqlite"
+    snap.parent.mkdir(parents=True)
+    snap.write_bytes(b"SQLite format 3\x00 snapshot")
+    (run_dir / "handoffs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in mantis.handoff_records(
+        gates=[{"gate": "repro_classifier", "decision": "patcher", "reason": "PoC reproduced the crash",
+                "ts": 2000.0}],
+        handoffs=[{"from_role": "researcher", "to_role": "reviewer", "ts": 1500.0,
+                   "db_snapshot": "state/0001-researcher-knowledge.sqlite"}])))
+
+    bundle = export(run_dir, tasks_dir=TASKS)
+    (h,) = of_type(bundle, "handoff")
+    (g,) = of_type(bundle, "code_decision")
+
+    assert h["role"] == "reviewer" and "researcher" in h["output"]
+    assert (bundle / h["state_ref"]["db_snapshot"]).read_bytes().startswith(b"SQLite format 3")
+    assert g["role"] == "repro_classifier"
+    assert "patcher" in g["output"] and "PoC reproduced" in g["output"]
+    assert h["seq"] < g["seq"]  # time-ordered
+
+
+# --- sandbox PoC runs become oracle_run steps ---------------------------------
+
+def test_each_sandbox_run_becomes_an_oracle_run_step(tmp_path):
+    run_dir = run_folder(tmp_path)
+    write_collector(run_dir, "oracle_runs.jsonl", {
+        "tool": "reproducer", "command": "/out/md4c_fuzzer /poc.bin",
+        "exit_code": 134, "crashed": True, "ts_start": 3000.0, "ts_end": 3002.5,
+        "stdout_ref": "collector/sandbox/run1.out"})
+
+    bundle = export(run_dir, tasks_dir=TASKS)
+    (o,) = of_type(bundle, "oracle_run")
+
+    assert o["oracle_ref"]["source"] == "mantis_sandbox"
+    assert o["oracle_ref"]["crashed"] is True
+    assert o["oracle_ref"]["exit_code"] == 134
+    assert o["latency_ms"] == 2500
+
+
+def test_a_run_with_no_collector_folder_gets_no_collector_steps(tmp_path):
+    """CyberGym's own agents have no `collector/`, so their bundles are unchanged."""
+    run_dir = run_folder(tmp_path)
+    bundle = export(run_dir, tasks_dir=TASKS)
+    assert of_type(bundle, "oracle_run") == []
+
+
+# --- ADK spans give each model call its node name as role ----------------------
+
+def _call(call_id: str, prompt_hash: str, system_prompt: str, text: str) -> dict:
+    return {
+        "record": "call", "litellm_call_id": call_id,
+        "start_time": "2026-10-27 12:00:00.0", "end_time": "2026-10-27 12:00:01.0",
+        "pilot": {"pilot_prompt_hash": prompt_hash, "pilot_role": None, "pilot_system": "mantis"},
+        "upstream_request": {"model": "mantis-node", "system": system_prompt,
+                             "messages": [{"role": "user", "content": "scan the code"}]},
+        "response": {"model": "claude-haiku-5-5",
+                     "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+                     "usage": {"prompt_tokens": 10, "completion_tokens": 3}},
+    }
+
+
+def test_adk_spans_label_each_model_call_with_its_node_name(tmp_path):
+    run_dir = run_folder(tmp_path)
+    (run_dir / "proxy.jsonl").write_text(
+        json.dumps(_call("c1", "h_res", "You are the researcher.", "found a bug")) + "\n"
+        + json.dumps(_call("c2", "h_pat", "You are the patcher.", "here is a fix")) + "\n")
+    write_collector(run_dir, "adk_spans.jsonl",
+        {"name": "researcher", "role": "researcher", "call_id": "c1",
+         "ts_start": 1000.0, "ts_end": 1001.0},
+        {"name": "patcher", "role": "patcher", "call_id": "c2",
+         "ts_start": 1002.0, "ts_end": 1003.0})
+
+    bundle = export(run_dir, tasks_dir=TASKS)
+    llm = of_type(bundle, "llm_step")
+
+    assert [s["role"] for s in llm] == ["researcher", "patcher"]
+    assert llm[0]["agent_instance_id"].startswith("researcher:")
+    assert llm[1]["agent_instance_id"].startswith("patcher:")
+
+
+# --- per-node routing to the proxy (box 1) ------------------------------------
+
+def _mantis_workflow() -> dict:
+    return {
+        "name": "mantis_graph",
+        "config": {"default_model": "vertex_ai/gemini-3.8-flash", "sandbox": {"type": "static-only"}},
+        "nodes": [
+            {"id": "researcher", "type": "agent", "model": "vertex_ai/gemini-3.5-flash-lite"},
+            {"id": "patcher", "type": "agent"},
+            {"id": "findings_gate", "type": "classifier", "routes": {"a": "b"}},
+        ],
+    }
+
+
+def test_pilot_workflow_routes_every_agent_node_through_the_proxy(tmp_path):
+    wf = mantis.pilot_workflow(_mantis_workflow(), gateway="172.18.0.1", port=4000,
+                               task_image="base-builder@sha256:abc")
+    agents = {n["id"]: n for n in wf["nodes"] if n["type"] == "agent"}
+
+    # every agent node on the proxy, each with its own api_base label, a per-node
+    # alias (role label), and no model name that is a real provider model.
+    for node_id, node in agents.items():
+        assert node["api_base"] == "http://172.18.0.1:4000"
+        assert node["model"] == f"openai/pilot-mantis.{node_id}"
+    # classifier gates are code-side: never given a model.
+    gate = next(n for n in wf["nodes"] if n["type"] == "classifier")
+    assert "model" not in gate or gate.get("model") is None
+
+    # the graph-wide default (preflight, helpers without a node) also on the proxy
+    assert wf["config"]["default_model"] == "openai/pilot-mantis.default"
+    assert wf["config"]["api_base"] == "http://172.18.0.1:4000"
+
+    # gVisor tier on the task image, no network is enforced by the tier itself.
+    sb = wf["config"]["sandbox"]
+    assert sb["type"] == "gvisor"
+    assert sb["options"]["image"] == "base-builder@sha256:abc"
+    assert sb["options"]["runtime"] == "runsc"
+
+
+# --- the real ADK session store (events.event_data, ADK 2.11) -> collector -----
+
+def adk_sessions(path: Path, events: list[dict]) -> Path:
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE events (id TEXT, app_name TEXT, user_id TEXT, session_id TEXT,"
+                 " invocation_id TEXT, timestamp REAL, event_data TEXT)")
+    for i, e in enumerate(events):
+        conn.execute("INSERT INTO events VALUES (?,?,?,?,?,?,?)",
+                     (str(i), "mantis_graph", "user1", "s1", "inv", e["timestamp"], json.dumps(e)))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def ev(author, node, t, **kw):
+    return {"author": author, "timestamp": t, "node_info": {"path": f"pipeline@1/{node}"},
+            "actions": kw.pop("actions", {}), "content": kw.pop("content", None), **kw}
+
+
+def test_adk_events_give_gates_handoffs_sandbox_runs_and_call_roles(tmp_path):
+    db = adk_sessions(tmp_path / "sessions.sqlite", [
+        ev("researcher", "researcher@1", 10.0),
+        ev("researcher", "researcher@1", 12.0, actions={"end_of_agent": True}),
+        ev("pipeline", "findings_gate@1", 13.0, actions={"route": "has_findings"}),
+        ev("reproducer", "reproducer@1", 20.0, content={"parts": [{"function_call": {
+            "id": "fc1", "name": "run_sandbox", "args": {"command": "./fuzz poc.bin"}}}]}),
+        ev("reproducer", "reproducer@1", 25.0, content={"parts": [{"function_response": {
+            "id": "fc1", "name": "run_sandbox", "response": {"result": "AddressSanitizer: heap-buffer-overflow"}}}]}),
+        ev("reproducer", "reproducer@1", 26.0, actions={"end_of_agent": True}),
+    ])
+    calls = [{"record": "call", "litellm_call_id": "c1", "start_time": 11.0, "end_time": 11.5,
+              "pilot": {"pilot_requested_model": "pilot-mantis.researcher"}},
+             {"record": "call", "litellm_call_id": "c2", "start_time": 21.0, "end_time": 22.0,
+              "pilot": {"pilot_requested_model": "pilot-mantis.reproducer"}}]
+
+    spans, gates, handoffs, oracle = mantis.read_sessions(db, calls, classifiers={"findings_gate"})
+
+    assert [(s["call_id"], s["role"]) for s in spans] == [("c1", "researcher"), ("c2", "reproducer")]
+    assert spans[1]["adk_path"] == "pipeline@1/reproducer@1"
+    assert gates == [{"gate": "findings_gate", "visit": 1, "decision": "has_findings", "reason": None, "ts": 13.0}]
+    assert [(h["from_role"], h["to_role"]) for h in handoffs] == [("researcher", "reproducer"), ("reproducer", "end")]
+    (o,) = oracle
+    assert o["tool"] == "run_sandbox" and o["command"] == "./fuzz poc.bin"
+    assert o["crashed"] is True and o["ts_start"] == 20.0 and o["ts_end"] == 25.0
+
+
+# --- OpenAI-format calls (Mantis's litellm client uses /chat/completions) -------
+
+def _chunk(delta=None, finish=None, usage=None):
+    c = {"object": "chat.completion.chunk", "model": "anthropic/claude-haiku-5.5",
+         "choices": [{"index": 0, "finish_reason": finish, "delta": delta or {}}]}
+    if usage:
+        c["usage"] = usage
+    return c
+
+
+def test_an_openai_format_streamed_call_becomes_a_full_llm_step(tmp_path):
+    from pilot.outcomes import run_outcome
+    run_dir = run_folder(tmp_path)
+    body = {"model": "anthropic/claude-haiku-5.5", "system": "You are the reproducer.",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "reproduce f001"}]}]}
+    call = {"record": "call", "litellm_call_id": "c1", "start_time": "2026-10-27 12:00:00.0",
+            "end_time": "2026-10-27 12:00:02.0", "upstream_request": json.dumps(body),
+            "pilot": {"pilot_prompt_hash": "h_rep", "pilot_requested_model": "pilot-mantis.reproducer"},
+            "response": {}}
+    usage = {"prompt_tokens": 100, "completion_tokens": 20, "cache_read_input_tokens": 60,
+             "cache_creation_input_tokens": 5, "cost": 0.0012}
+    stream = {"record": "stream", "litellm_call_id": "c1", "events": [
+        _chunk({"role": "assistant", "reasoning_content": "Build the fuzzer first."}),
+        _chunk({"content": "Running it."}),
+        _chunk({"tool_calls": [{"index": 0, "id": "toolu_1", "function": {"name": "run_sandbox", "arguments": ""}}]}),
+        _chunk({"tool_calls": [{"index": 0, "function": {"arguments": '{"command": "./fuzz'}}]}),
+        _chunk({"tool_calls": [{"index": 0, "function": {"arguments": ' poc.bin"}'}}]}),
+        _chunk(finish="tool_calls"),
+        _chunk(usage=usage)]}
+    (run_dir / "proxy.jsonl").write_text(json.dumps(call) + "\n" + json.dumps(stream) + "\n")
+
+    (s,) = of_type(export(run_dir, tasks_dir=TASKS), "llm_step")
+
+    assert s["output"] == "Running it."
+    assert s["thinking_summary"]["text"] == "Build the fuzzer first."
+    assert [(t["name"], t["args"]) for t in s["tool_calls"]] == [("run_sandbox", {"command": "./fuzz poc.bin"})]
+    assert s["tokens"] == {"input": 100, "output": 20, "cache_read": 60, "cache_write": 5}
+    assert s["cost_usd"] == 0.0012 and s["stop_reason"] == "tool_use"
+    assert s["input_delta"][0]["content"][0]["text"] == "reproduce f001"
+    assert run_outcome(run_dir)["cost_usd_openrouter"] == 0.0012
+
+
+def test_a_finding_with_only_code_paths_names_its_function_and_keeps_its_repro_script(tmp_path):
+    """Mantis often records no lines, only `code_paths` ("file: function ..."),
+    and its reproducer writes a driver script, not target input: the script is
+    kept with the finding, never submitted to CyberGym as a PoC."""
+    run_dir = run_folder(tmp_path)
+    db = mantis_db(run_dir / "knowledge.sqlite", [{
+        "filepath": "src/md4c-html.c", "title": "Dangerous URL schemes", "description": "javascript: in href",
+        "code_paths": json.dumps(["src/md4c-html.c: render_url_escaped", "src/md4c-html.c: render_attribute"])}])
+    (run_dir / "mantis/repro").mkdir(parents=True)
+    (run_dir / "mantis/repro/repro_1.py").write_text("#!/usr/bin/env python3\nPAYLOAD = b'[x](javascript:1)'\n")
+
+    mantis.write_findings(run_dir, db, repro={1: "mantis/repro/repro_1.py"})
+    bundle = export(run_dir, tasks_dir=TASKS)
+    (f,) = bundle_findings(bundle)
+
+    assert f["location"]["function"] == "render_url_escaped"
+    assert f["poc"] is None
+    assert (bundle / f["repro_script"]).read_text().startswith("#!/usr/bin/env python3")
+    assert f["tp_target_check"] == {**f["tp_target_check"], "method": "location_overlap", "result": "fail"}
+
+
+# --- the real Mantis data run (tests/fixtures/runs, ticket 07) -----------------
+
+MANTIS_DATA = "20261027T135230-mantis-md4c_arvo_31332-data"
+
+
+@pytest.fixture(scope="module")
+def mantis_bundle(tmp_path_factory):
+    import shutil
+    run_dir = tmp_path_factory.mktemp("mantis") / MANTIS_DATA
+    shutil.copytree(FIXTURES / "runs" / MANTIS_DATA, run_dir)
+    return export(run_dir, tasks_dir=TASKS)
+
+
+def test_the_mantis_data_run_bundle_has_every_kind_of_step(mantis_bundle):
+    ss = steps(mantis_bundle)
+    kinds = {t: sum(s["step_type"] == t for s in ss) for t in ("llm_step", "code_decision", "handoff", "oracle_run")}
+    assert kinds == {"llm_step": 87, "code_decision": 4, "handoff": 13, "oracle_run": 14}
+    # every model call carries its graph node, joined from the ADK spans
+    assert all(s["role"] for s in ss if s["step_type"] == "llm_step")
+    assert {s["role"] for s in ss if s["step_type"] == "code_decision"} == \
+        {"findings_gate", "reviewer_classifier", "critic_classifier", "repro_classifier"}
+    assert all((s["state_ref"] or {}).get("db_snapshot") for s in ss if s["step_type"] == "handoff")
+    assert all(s["oracle_ref"]["source"] == "mantis_sandbox" for s in ss if s["step_type"] == "oracle_run")
+
+
+def test_the_mantis_data_run_findings_miss_the_known_bug(mantis_bundle):
+    fs = bundle_findings(mantis_bundle)
+    assert len(fs) == 5
+    assert all(f["tp_target_check"]["method"] == "location_overlap" for f in fs)
+    assert all(f["verdict"] is None for f in fs)  # left to coders (ADR 0004)

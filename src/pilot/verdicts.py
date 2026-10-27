@@ -172,7 +172,7 @@ def _copy_files(finding: dict, run_dir: Path, bundle: Path) -> dict:
     """Copy the finding's PoC, patch and stack trace into `findings/<id>/` so the
     bundle stands alone; the fields then name the bundle copies."""
     copied = {}
-    for field in ("poc", "patch", "stack_trace"):
+    for field in ("poc", "patch", "stack_trace", "repro_script"):
         src = finding.get(field)
         if src and (run_dir / src).is_file():
             rel = f"findings/{finding['finding_id']}/{field}{Path(src).suffix}"
