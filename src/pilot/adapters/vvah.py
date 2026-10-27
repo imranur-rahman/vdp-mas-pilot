@@ -27,7 +27,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .. import infra
+from .. import infra, isolation
 
 SYSTEM = "visa-vvah"
 UPSTREAM = "https://github.com/visa/visa-vulnerability-agentic-harness"
@@ -169,6 +169,10 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     fw = FirewallProxyManager()
     fw.connect()
     cid, error = None, None
+    # Container events cover the system's container only; CyberGym's validation
+    # containers (the oracle, on the default bridge) start after the log stops.
+    events = isolation.ContainerEventLog(run_dir)
+    events.start()
     try:
         cid = start_container(build_image, container_name=f"vvah-{uuid.uuid4().hex[:8]}", workdir="/src")
         meta["container_id"] = cid
@@ -189,6 +193,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         (vvah_dir / "pip-freeze.txt").write_text(freeze)
 
         switch_network(cid, "bridge", fw.network_name)  # P1: from here only the proxy
+        events.mark(isolation.SYSTEM_STARTED)
 
         env = {**fw.env_vars(), "ANTHROPIC_API_KEY": key,
                "ANTHROPIC_BASE_URL": f"http://{gateway}:{infra.PROXY_PORT}",
@@ -217,6 +222,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     finally:
         if cid:
             cleanup_container(cid)
+        events.stop()
 
     findings = []
     try:
@@ -227,8 +233,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         validate(run_dir, task, findings, data_path, script_path, build_image)
     (run_dir / "findings.json").write_text(json.dumps({"findings": findings}, indent=2))
 
-    meta.update(finished_at=time.time(), error=error,
-                outcome=runner._outcome(run_dir, [key], budget, error))
+    meta.update(finished_at=time.time(), error=error, key_spend=infra.key_spend(key),
+                outcome=runner._outcome(run_dir, [key], budget, error), isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
 

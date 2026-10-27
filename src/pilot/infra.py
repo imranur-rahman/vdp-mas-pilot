@@ -14,7 +14,10 @@ CYBERGYM_SCRIPTS = CYBERGYM / "scripts"
 # The proxy writes each run's log under the runs folder it has mounted; a
 # worktree that shares the running proxy sets PILOT_RUNS_DIR to that folder.
 RUNS = Path(os.environ.get("PILOT_RUNS_DIR") or REPO / "runs")
-PROXY_PORT = 4000
+# A second proxy stack (another worktree, a demo) can run beside the shared
+# one under its own compose project and port; the defaults are the shared stack.
+COMPOSE_PROJECT = os.environ.get("PILOT_COMPOSE_PROJECT", "pilot")
+PROXY_PORT = int(os.environ.get("PILOT_PROXY_PORT", "4000"))
 # P1: the agent's only exit is the host gateway (LiteLLM). Squid needs at least
 # one entry, so the allowlist holds a name that can never resolve.
 EMPTY_ALLOWLIST = REPO / "infra" / "firewall" / "allowlist.txt"
@@ -52,8 +55,9 @@ def ensure_firewall() -> str:
 
 def ensure_proxy(gateway_ip: str) -> str:
     """Bring up LiteLLM + Postgres + Phoenix, publishing LiteLLM on the gateway IP."""
-    env = {**os.environ, **load_env(), "PILOT_GATEWAY_IP": gateway_ip, "PILOT_RUNS_DIR": str(RUNS)}
-    subprocess.run(["docker", "compose", "-p", "pilot", "up", "-d", "--wait"],
+    env = {**os.environ, **load_env(), "PILOT_GATEWAY_IP": gateway_ip, "PILOT_RUNS_DIR": str(RUNS),
+           "PILOT_PROXY_PORT": str(PROXY_PORT)}
+    subprocess.run(["docker", "compose", "-p", COMPOSE_PROJECT, "up", "-d", "--wait"],
                    cwd=REPO / "infra", env=env, check=True)
     base = f"http://127.0.0.1:{PROXY_PORT}"
     deadline = time.time() + 180
