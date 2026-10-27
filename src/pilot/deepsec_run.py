@@ -29,7 +29,7 @@ import tarfile
 import time
 from pathlib import Path
 
-from . import deepsec, infra, runner, state
+from . import deepsec, infra, isolation, runner, state
 
 UPSTREAM = "https://github.com/vercel-labs/deepsec"
 PINNED_COMMIT = "4fa67220aff67ac93dfc840206d3d32bfa4411ec"
@@ -129,6 +129,8 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
     minted: list[str] = []
     cid, error, commands = None, None, []
     deadline = time.time() + timeout_s
+    events = isolation.ContainerEventLog(run_dir)
+    events.start()
     try:
         cid = cg.start_container(config["build_image"], container_name=f"pilot-{run_id}"[:63], workdir="/src")
         meta["container"] = cid
@@ -147,6 +149,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
         if code != 0:
             raise RuntimeError(f"deepsec install failed ({code}): {err[-800:]}")
         cg.switch_network(cid, "bridge", fw.network_name)
+        events.mark(isolation.SYSTEM_STARTED)  # install-phase networking is over
         meta["install_finished_at"] = time.time()
 
         state.capture(run_dir, "after-install", _capture_files(cg, cid, workspace),
@@ -188,6 +191,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
     finally:
         if cid:
             cg.cleanup_container(cid)
+        events.stop()
 
     meta["commands"] = commands
     _write_findings(run_dir, data_path / "src.tgz", config["repo_to_patch"])
@@ -198,7 +202,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
     evidence = _scope(run_dir, config["repo_to_patch"])
     meta["scope_evidence"] = evidence
     outcome["outcome"] = deepsec.decide_outcome(outcome["outcome"], commands, evidence, error)
-    meta.update(finished_at=time.time(), error=error, outcome=outcome)
+    meta.update(finished_at=time.time(), error=error, outcome=outcome, isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
 

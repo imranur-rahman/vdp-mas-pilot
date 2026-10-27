@@ -5,9 +5,11 @@ import argparse
 import json
 from pathlib import Path
 
-from . import claims, coding, deepsec_run, exporter, infra, runner
+from . import claims, coding, deepsec_run, exporter, infra, isolation, runner
 
-RUNS = {"claude-code": runner.run_claude_code, "deepsec": deepsec_run.run_deepsec}
+
+RUNS = {"claude-code": runner.run_claude_code, "claude-code-runner": runner.run_claude_code_in_runner,
+        "deepsec": deepsec_run.run_deepsec}
 
 
 def main():
@@ -17,8 +19,15 @@ def main():
     up = sub.add_parser("up", help="start the firewall and the proxy stack")
     up.set_defaults(fn=lambda a: print("proxy:", infra.ensure_proxy(infra.ensure_firewall())))
 
+    probe = sub.add_parser("probe", help="check what a runner container can reach (expected: only LiteLLM)")
+    probe.add_argument("--image", default="pilot-runner-claude-code:2.1.91")
+    probe.set_defaults(fn=lambda a: print(json.dumps(
+        isolation.probe_runner_network(infra.ensure_firewall(), a.image), indent=2)))
+
     run = sub.add_parser("run", help="run one system on one task")
-    run.add_argument("system", choices=["claude-code", "deepsec"])
+    run.add_argument("system", choices=list(RUNS),
+                     help="claude-code: in the task container; claude-code-runner: in a runner container;"
+                          " deepsec: in the task container")
     run.add_argument("task", help="CyberGym-E2E task, e.g. md4c/arvo_31332")
     run.add_argument("--kind", choices=["dev", "data"], required=True)
     run.add_argument("--budget", type=float, help="hard cap in USD (default: dev 2, data 20)")
