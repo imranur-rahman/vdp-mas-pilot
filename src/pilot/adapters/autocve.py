@@ -365,7 +365,9 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
                 run_id=run_id, system=SYSTEM, image=RUNNER_IMAGE, command=cmd, gateway_ip=gateway, env=env,
                 workdir="/app", user="root",
                 volumes={str(run_dir): {"bind": str(run_dir), "mode": "rw"},
-                         "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"}})
+                         "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
+                         # the start script from this checkout, so that it never lags the image
+                         str(START_SCRIPT): {"bind": "/opt/pilot/autocve_start.py", "mode": "ro"}})
             meta["runner_container"] = container.name
             try:
                 exit_code = container.wait(timeout=timeout_s + 900)["StatusCode"]

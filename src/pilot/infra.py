@@ -13,7 +13,7 @@ CODE = Path(__file__).resolve().parents[2]
 # and the running proxy stack. PILOT_HOME lets code in a git worktree use the
 # main checkout's, so it neither restarts the shared proxy nor splits run folders.
 REPO = Path(os.environ.get("PILOT_HOME") or CODE).resolve()
-SYSTEMS = CODE / "systems"
+SYSTEMS = CODE / "systems"  # system adapter files live with the code (this worktree)
 CYBERGYM = REPO / "vendor" / "cybergym-e2e"
 CYBERGYM_SCRIPTS = CYBERGYM / "scripts"
 # The proxy writes each run's log under the runs folder it has mounted; a

@@ -248,8 +248,14 @@ def main():  # pragma: no cover - runs inside the runner container
     p.add_argument("--timeout", type=int, default=5400)
     args = p.parse_args()
     # Settings are read when AutoCVE is imported: set them first.
+    # SQLite in place of Postgres: WAL lets readers run beside a writer, and the
+    # busy timeout makes concurrent sessions wait instead of failing with
+    # "database is locked" (seen in the first dev run with the 5 s default).
+    con = sqlite3.connect(args.db)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.close()
     os.environ.update({
-        "DATABASE_URL": f"sqlite+aiosqlite:///{args.db}",
+        "DATABASE_URL": f"sqlite+aiosqlite:///{args.db}?timeout=600",
         "MANAGED_PROJECTS_ROOT": args.projects_root,
         "AGENT_TASK_EXECUTION_MODE": "inline",
         "AGENT_EVENT_STREAM_ENABLED": "false",
