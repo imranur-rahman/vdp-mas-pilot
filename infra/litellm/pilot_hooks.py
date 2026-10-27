@@ -9,7 +9,10 @@ sampling settings Sonnet 5.5 rejects (M-3), and attach pilot labels for the
 log. Summarized thinking (M-1) and provider routing are set on the finished
 upstream body (see finish_upstream_body).
 
-Logging: append one raw record per call to runs/<run_id>/proxy.jsonl.
+Logging: append raw records to runs/<run_id>/proxy.jsonl: one `call` record
+per call, a `stream` record with the raw events of each streamed call, a
+`refusal` record with its category for each refused call (M-2), and a
+`budget_exceeded` record when the run's key hits its cap (D6).
 """
 
 import functools
@@ -119,17 +122,55 @@ class PilotHooks(CustomLogger):
                 events.append(item)
                 yield item
         finally:
-            meta = {}
-            for k in ("metadata", "litellm_metadata"):
-                meta.update(request_data.get(k) or {})
-            pilot = {k: v for k, v in meta.items() if k.startswith("pilot_")}
+            pilot = _pilot_labels(request_data)
+            raw = [_event(e) for e in events]
             self._append(pilot.get("pilot_run_id"), {
                 "logged_at": time.time(),
                 "record": "stream",
                 "litellm_call_id": request_data.get("litellm_call_id"),
                 "pilot": pilot,
-                "events": [_event(e) for e in events],
+                "events": raw,
             })
+            details = _streamed_refusal(raw)
+            if details is not None:
+                self._refusal(request_data, pilot, details)
+
+    async def async_post_call_success_hook(self, data, user_api_key_dict, response):
+        body = response if isinstance(response, dict) else \
+            getattr(response, "model_dump", lambda: {})()
+        if isinstance(body, dict) and body.get("stop_reason") == "refusal":
+            self._refusal(data, _pilot_labels(data), body.get("stop_details") or {})
+        return response
+
+    async def async_post_call_failure_hook(self, request_data, original_exception, user_api_key_dict,
+                                           traceback_str=None):
+        # A key over its cap is rejected before the call exists, so no `call`
+        # record is written; label the rejection from the key itself.
+        if "budget" not in f"{type(original_exception).__name__} {original_exception}".lower():
+            return None
+        key_meta = getattr(user_api_key_dict, "metadata", None) or {}
+        pilot = {k: v for k, v in key_meta.items() if k.startswith("pilot_")}
+        self._append(pilot.get("pilot_run_id"), {
+            "logged_at": time.time(),
+            "record": "budget_exceeded",
+            "pilot": pilot,
+            "spend": getattr(user_api_key_dict, "spend", None),
+            "max_budget": getattr(user_api_key_dict, "max_budget", None),
+            "requested_model": request_data.get("model"),
+            "exception": str(original_exception),
+        })
+        return None
+
+    def _refusal(self, request_data, pilot, details):
+        self._append(pilot.get("pilot_run_id"), {
+            "logged_at": time.time(),
+            "record": "refusal",
+            "litellm_call_id": request_data.get("litellm_call_id"),
+            "pilot": pilot,
+            "category": details.get("category"),
+            "explanation": details.get("explanation"),
+            "stop_details": details,
+        })
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         self._write(kwargs, response_obj, start_time, end_time, "success")
@@ -167,6 +208,29 @@ class PilotHooks(CustomLogger):
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("a") as f:
             f.write(json.dumps(record, default=str) + "\n")
+
+
+def _pilot_labels(request_data: dict) -> dict:
+    meta = {}
+    for k in ("metadata", "litellm_metadata"):
+        meta.update(request_data.get(k) or {})
+    return {k: v for k, v in meta.items() if k.startswith("pilot_")}
+
+
+def _streamed_refusal(raw_events: list) -> dict | None:
+    """stop_details of a streamed call that stopped with `refusal`, else None."""
+    for event in raw_events:
+        for line in str(event).split("\n"):
+            if not line.startswith("data:"):
+                continue
+            try:
+                d = json.loads(line[5:])
+            except ValueError:
+                continue
+            delta = d.get("delta") if isinstance(d, dict) and d.get("type") == "message_delta" else None
+            if isinstance(delta, dict) and delta.get("stop_reason") == "refusal":
+                return delta.get("stop_details") or {}
+    return None
 
 
 def _event(item):
