@@ -126,7 +126,7 @@ def _llm_steps(records: list[dict], bundle: Path, role_windows: list[dict] = ())
     for i, call in enumerate(calls):
         pilot = call.get("pilot") or {}
         request = _request_of(call, requests)
-        prompt_id = pilot.get("pilot_prompt_hash")
+        prompt_id = _prompt_id(pilot, request)
         ts_start, ts_end = _ts(call.get("start_time")), _ts(call.get("end_time"))
         role = pilot.get("pilot_role")
         role_source = "per_role_key" if role else None
@@ -422,6 +422,37 @@ def _save_prompt(bundle: Path, prompt_id: str | None, request: dict) -> None:
     if not path.exists():
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps({"system": request.get("system"), "tools": request.get("tools")}, indent=2))
+
+
+BILLING_HEADER = "x-anthropic-billing-header:"
+
+
+def _prompt_id(pilot: dict, request: dict) -> str | None:
+    """The prompt hash the proxy logged, unless the system prompt carries Claude
+    Code's per-request billing-header line: then the hash of the prompt without
+    it, as the proxy now computes it (pilot_hooks.prompt_hash), so logs written
+    before that fix export the same way."""
+    text = _system_prompt_text(request)
+    if BILLING_HEADER not in text:
+        return pilot.get("pilot_prompt_hash")
+    text = "\n".join(l for l in text.split("\n") if not l.startswith(BILLING_HEADER))
+    return hashlib.sha256(text.encode()).hexdigest()[:16] if text else None
+
+
+def _system_prompt_text(data: dict) -> str:
+    """System prompt of an Anthropic- or OpenAI-format request, as plain text
+    (the same text as pilot_hooks.system_prompt_text)."""
+    parts = []
+    system = data.get("system")
+    if isinstance(system, str):
+        parts.append(system)
+    elif isinstance(system, list):
+        parts += [b.get("text", "") for b in system if isinstance(b, dict)]
+    for m in data.get("messages") or []:
+        if isinstance(m, dict) and m.get("role") == "system":
+            c = m.get("content")
+            parts.append(c if isinstance(c, str) else json.dumps(c, sort_keys=True))
+    return "\n".join(parts)
 
 
 def _hash(messages: list) -> str:

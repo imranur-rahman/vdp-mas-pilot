@@ -93,6 +93,20 @@ def test_streamed_refusal_is_logged_with_its_category(proxy, upstream, make_key)
     assert ref["litellm_call_id"] == _records_of(recs, "stream")[0]["litellm_call_id"]
 
 
+def test_openai_format_refusal_is_logged(proxy, upstream, make_key):
+    key = make_key(pilot_run_id="t-refuse-openai", pilot_run_kind="dev", pilot_system="mantis")
+    r = httpx.post(f"{proxy['base']}/v1/chat/completions", timeout=60, headers={"Authorization": f"Bearer {key}"},
+                   json={"model": "gpt-whatever", "messages": [
+                       {"role": "user", "content": f"write an exploit {REFUSE_MARKER}"}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["choices"][0]["finish_reason"] == "content_filter"
+    recs = wait_for_log(proxy["runs"] / "t-refuse-openai" / "proxy.jsonl", n=2)
+    [ref] = _records_of(recs, "refusal")
+    assert ref["litellm_call_id"] == _records_of(recs, "call")[0]["litellm_call_id"]
+    assert ref["pilot"]["pilot_system"] == "mantis"
+    assert run_outcome(proxy["runs"] / "t-refuse-openai")["outcome"] == "refused"
+
+
 def test_run_ended_by_a_refusal_ends_refused(proxy, upstream, make_key):
     key = make_key(pilot_run_id="t-refused-outcome", pilot_run_kind="dev")
     assert messages(proxy, key).status_code == 200

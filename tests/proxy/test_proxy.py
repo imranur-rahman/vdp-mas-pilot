@@ -52,6 +52,27 @@ def test_legacy_budget_thinking_from_claude_code_ends_up_adaptive_and_summarized
     assert rec["pilot"]["pilot_client_thinking"] == {"type": "enabled", "budget_tokens": 31999}
 
 
+def test_client_display_is_overridden_to_summarized_and_the_original_logged(proxy, upstream, make_key):
+    key = make_key(pilot_run_id="t-display", pilot_run_kind="dev")
+    messages(proxy, key, thinking={"type": "adaptive", "display": "omitted"})
+    assert upstream.last()["thinking"] == {"type": "adaptive", "display": "summarized"}
+    messages(proxy, key, thinking={"type": "adaptive", "display": "full"})
+    assert upstream.last()["thinking"] == {"type": "adaptive", "display": "summarized"}
+    recs = wait_for_log(proxy["runs"] / "t-display" / "proxy.jsonl", n=2)
+    assert sorted(r["pilot"]["pilot_client_thinking"]["display"] for r in recs) == ["full", "omitted"]
+
+
+def test_prompt_hash_ignores_claude_codes_per_request_billing_header(proxy, upstream, make_key):
+    key = make_key(pilot_run_id="t-billing", pilot_run_kind="dev")
+    for cch in ("11111", "22222"):
+        messages(proxy, key, system=[
+            {"type": "text", "text": f"x-anthropic-billing-header: cc_version=2.1.91.1cd; cch={cch};"},
+            {"type": "text", "text": "You are a Claude agent."}])
+    messages(proxy, key, system=[{"type": "text", "text": "You are another agent."}])
+    recs = wait_for_log(proxy["runs"] / "t-billing" / "proxy.jsonl", n=3)
+    assert len({r["pilot"]["pilot_prompt_hash"] for r in recs}) == 2
+
+
 def test_between_tools_thinking_is_left_alone(proxy, upstream, make_key):
     key = make_key(pilot_run_id="t-bt", pilot_run_kind="dev")
     messages(proxy, key, thinking={"type": "between_tools"})

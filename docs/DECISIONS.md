@@ -85,7 +85,9 @@ optional replay and fault injection, and an open dataset.
 
 - **M-1 Thinking summaries.** The proxy sets `thinking.display: "summarized"` on
   every request that has thinking on (adaptive), and skips Sonnet 5.5's
-  `between_tools` mode, where `display` causes a 400. Summaries go in a
+  `between_tools` mode, where `display` causes a 400. It overrides any
+  `display` the client sent (deepsec sends `omitted`); the client's own
+  `thinking` is logged as `pilot_client_thinking`. Summaries go in a
   separate `thinking_summary` step field, marked as model-written summaries,
   not reasoning. Raw chain of thought is never available, and we do not
   try to extract it. T1 checks that summaries include the narration between
@@ -182,7 +184,7 @@ step stores only `input_delta`; the full request is kept once, in the raw proxy 
 | `stage` | joined later from `role-stage-map` |
 | `input_delta`, `input_prefix_hash` | proxy JSONL |
 | `output`, `thinking_summary`, `tool_calls[]` (name, args, result, timing) | proxy JSONL, native traces |
-| `prompt_id` (system-prompt hash), `skill` | proxy JSONL, the system's files |
+| `prompt_id` (system-prompt hash, without Claude Code's per-request `x-anthropic-billing-header:` line), `skill` | proxy JSONL, the system's files |
 | `claim` (with the model and prompt that extracted it) | exporter extraction pass (T-3) |
 | `model`, `tokens` (input, output, cache), `cost_usd`, `latency_ms`, `ts_start`, `ts_end` | proxy |
 | `state_ref`, `oracle_ref`, `refusal_category`, `dropped_params` | collector, proxy |

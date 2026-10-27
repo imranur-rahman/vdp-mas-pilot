@@ -48,4 +48,4 @@ def test_a_run_without_roles_gets_one_unlabelled_key_under_the_run_cap(proxy, up
         time.sleep(0.5)
     assert "budget" in r.text.lower()
     recs = [r for r in wait_for_log(proxy["runs"] / "t-single-cap" / "proxy.jsonl") if r["record"] == "call"]
-    assert "pilot_role" not in recs[0]["pilot"]
+    assert recs[0]["pilot"].get("pilot_role") is None

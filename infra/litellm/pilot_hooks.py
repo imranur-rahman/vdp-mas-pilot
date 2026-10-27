@@ -15,6 +15,7 @@ per call, a `stream` record with the raw events of each streamed call, a
 `budget_exceeded` record when the run's key hits its cap (D6).
 """
 
+import copy
 import functools
 import hashlib
 import json
@@ -44,9 +45,10 @@ PROVIDER_ROUTING = {"order": ["anthropic"], "allow_fallbacks": False}
 def finish_upstream_body(body: dict) -> dict:
     body["provider"] = PROVIDER_ROUTING  # ADR 0003
     thinking = body.get("thinking")
-    if isinstance(thinking, dict) and thinking.get("type") == "adaptive" \
-            and thinking.get("display") in (None, "omitted"):
-        thinking["display"] = "summarized"  # M-1; between_tools takes no display
+    if isinstance(thinking, dict) and thinking.get("type") == "adaptive":
+        # M-1: whatever the client asked for (logged as pilot_client_thinking);
+        # between_tools takes no display.
+        thinking["display"] = "summarized"
     return body
 
 
@@ -77,8 +79,14 @@ def system_prompt_text(data: dict) -> str:
     return "\n".join(parts)
 
 
+BILLING_HEADER = "x-anthropic-billing-header:"
+
+
 def prompt_hash(data: dict) -> str | None:
-    text = system_prompt_text(data)
+    """Hash of the system prompt without Claude Code / the Agent SDK's
+    per-request billing-header line, which changes on every call
+    (pilot.exporter._prompt_id normalizes older logs the same way)."""
+    text = "\n".join(l for l in system_prompt_text(data).split("\n") if not l.startswith(BILLING_HEADER))
     return hashlib.sha256(text.encode()).hexdigest()[:16] if text else None
 
 
@@ -111,7 +119,7 @@ class PilotHooks(CustomLogger):
             "pilot_role": key_meta.get("pilot_role"),
             "pilot_requested_model": requested_model,
             "pilot_dropped_params": dropped,
-            "pilot_client_thinking": data.get("thinking"),
+            "pilot_client_thinking": copy.deepcopy(data.get("thinking")),  # finish_upstream_body mutates it
             "pilot_prompt_hash": prompt_hash(data),
             "pilot_call_type": str(call_type),
         })
@@ -155,6 +163,11 @@ class PilotHooks(CustomLogger):
             getattr(response, "model_dump", lambda: {})()
         if isinstance(body, dict) and body.get("stop_reason") == "refusal":
             self._refusal(data, _pilot_labels(data), body.get("stop_details") or {})
+        elif isinstance(body, dict) and any(isinstance(c, dict) and c.get("finish_reason") == "content_filter"
+                                            for c in body.get("choices") or []):
+            # OpenAI format: LiteLLM maps Anthropic's refusal to content_filter
+            # and keeps no stop_details, so the category is unknown.
+            self._refusal(data, _pilot_labels(data), {})
         return response
 
     async def async_post_call_failure_hook(self, request_data, original_exception, user_api_key_dict,
