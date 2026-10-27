@@ -7,7 +7,9 @@ Never Phoenix. The bundle is written to `<run folder>/bundle/`:
 - `steps.jsonl`: one step record per line (docs/DECISIONS.md, Step record)
 - `run.json`: the run's metadata and outcome
 - `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once
-- `oracle/`: the PoC and patch each CyberGym validation checked
+- `oracle/`: the PoC and patch each CyberGym validation checked, and the task's
+  known patch (`oracle/ground_truth.patch`)
+- `findings.json`: normalized findings with their `tp_target` checks (verdicts.py)
 - `trajectory.md`: the run rendered for a human reader
 """
 
@@ -18,7 +20,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import stages
+from . import stages, verdicts
 
 STEP_FIELDS = (
     "run_id", "task_id", "system", "iteration",
@@ -52,10 +54,13 @@ def load_proxy_log(run_dir: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stages.DEFAULT_MAP) -> Path:
+def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stages.DEFAULT_MAP,
+           tasks_dir: Path = verdicts.DEFAULT_TASKS) -> Path:
     """Build the trajectory bundle for one run folder and return its path.
 
     `stage_map` is the versioned role-to-stage map joined onto the steps (T-5).
+    `tasks_dir` holds each task's `patch.diff` for the `tp_target` checks (F-1),
+    used when the run folder has no `ground_truth/patch.diff`.
     """
     run_dir = Path(run_dir)
     bundle = Path(out_dir) if out_dir else run_dir / "bundle"
@@ -80,7 +85,8 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
 
     (bundle / "steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in steps))
     (bundle / "run.json").write_text(json.dumps(run, indent=2))
-    (bundle / "trajectory.md").write_text(render(run, steps, bundle))
+    findings = verdicts.build_findings(run_dir, run, bundle, tasks_dir)
+    (bundle / "trajectory.md").write_text(render(run, steps, bundle, findings))
     return bundle
 
 
@@ -363,7 +369,7 @@ STAGE_NAMES = {1: "agent's PoC crashes the unpatched build",
                4: "ground-truth PoC no longer crashes with the patch"}
 
 
-def render(run: dict, steps: list[dict], bundle: Path | None = None) -> str:
+def render(run: dict, steps: list[dict], bundle: Path | None = None, findings: list[dict] | None = None) -> str:
     """The run as Markdown, readable without tools. Long text is cut at
     MAX_BLOCK_CHARS; steps.jsonl keeps it whole."""
     outcome = run.get("outcome") or {}
@@ -379,6 +385,8 @@ def render(run: dict, steps: list[dict], bundle: Path | None = None) -> str:
     shown: set[str] = set()  # oracle files already printed in full
     for s in steps:
         out += _render_step(s, issued_in, bundle, shown)
+    if findings is not None:
+        out += verdicts.render_findings(findings)
     return "\n".join(out) + "\n"
 
 
