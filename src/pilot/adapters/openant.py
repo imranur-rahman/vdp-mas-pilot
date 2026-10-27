@@ -28,7 +28,17 @@ state collector is `openant_collector.py`.
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+import time
+import tomllib
+from pathlib import Path
+
 SYSTEM = "openant"
+UPSTREAM = "https://github.com/knostic/OpenAnt"
+COMMIT = "9143061"  # re-checked at HEAD 2026-10-27 (NOTES.md)
+RUNNER_IMAGE = "pilot-runner-openant:9143061"
 
 # The seven pipeline phases (README "hand-authored config"; each is a role the
 # proxy labels by its own key). Order is the pipeline's rough execution order.
@@ -168,3 +178,183 @@ def handoff_steps(records: list[dict]) -> list[dict]:
             "ts_end": r.get("t"),
         })
     return steps
+
+
+# --- install / run / output (runtime) ---------------------------------------
+# These need Docker and the pilot infrastructure; the pure transforms above are
+# tested at seam 2, the run itself is accepted by a dev then a data run.
+
+COLLECTOR = Path(__file__).with_name("openant_collector.py")
+IN = "/pilot"            # adapter files inside the runner container
+SCAN_DIR = "/output/scan"
+STATE_DIR = "/output/state"
+
+
+def ensure_image(run_dir: Path) -> dict:
+    """Build the OpenAnt runner image if absent (setup, with internet: git +
+    Go modules + PyPI are not on the dynamic-test registry allowlist). Done
+    before the run's isolation window, so its build containers are not
+    attributed to the run. The per-finding dynamic-test image builds that DO
+    happen during a run go through `isolation.build_image` (allowlist)."""
+    from .. import infra, isolation
+    if isolation._image_exists(RUNNER_IMAGE):
+        return {"built": False, "image": RUNNER_IMAGE}
+    context = infra.REPO / "infra" / "runner" / "openant"
+    started = time.time()
+    r = subprocess.run(["docker", "build", "-t", RUNNER_IMAGE,
+                        "--build-arg", f"OPENANT_COMMIT={COMMIT}", str(context)],
+                       capture_output=True, text=True)
+    (run_dir / "openant").mkdir(parents=True, exist_ok=True)
+    (run_dir / "openant" / "image_build.log").write_text(r.stdout + "\n--- stderr ---\n" + r.stderr)
+    if r.returncode != 0:
+        raise RuntimeError(f"OpenAnt image build failed: {r.stderr[-1500:]}")
+    return {"built": True, "image": RUNNER_IMAGE, "seconds": round(time.time() - started, 1)}
+
+
+def scan_argv(repo: str, model: str) -> list[str]:
+    """`openant scan` with default dynamic testing and Stage-2 verification on,
+    every phase on the pilot llm-config. No fetching flags (no --pr/--diff-base,
+    no `patch --cve`)."""
+    return ["openant", "scan", f"/src/{repo}", "-l", "c", "--verify",
+            "--llm-config", CONFIG_NAME, "-o", SCAN_DIR, "--repo-name", repo, "--workers", "4"]
+
+
+def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
+    from .. import infra, isolation, runner
+
+    budget = budget_usd if budget_usd is not None else runner.DEFAULT_BUDGET[kind]
+    model = runner.MODELS[kind]
+    run_id = runner.new_run_id(SYSTEM, task, kind)
+    run_dir = infra.RUNS / run_id
+    run_dir.mkdir(parents=True)
+    run_dir.chmod(0o777)  # the proxy container writes proxy.jsonl here
+    oa = run_dir / "openant"
+    oa.mkdir()
+
+    gateway = infra.ensure_firewall()
+    _ensure_proxy(gateway)
+    proxy_url = f"http://{gateway}:{infra.PROXY_PORT}"
+
+    # ADR 0002: one per-run key per phase, so the proxy labels each call's role.
+    phase_keys = {p: infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget, role=p)
+                  for p in PHASES}
+    config = build_config(model, proxy_url, phase_keys)
+    config_path = oa / "config.json"
+    config_path.write_text(json.dumps(config, indent=2))
+    config_path.chmod(0o600)  # OpenAnt restricts ~/.config/openant/config.json
+
+    project, task_name = task.split("/")
+    config_toml = tomllib.loads((infra.CYBERGYM / "projects" / project / "project.toml").read_text())
+    repo = config_toml["repo_to_patch"]
+
+    workspace = run_dir / "workspace"
+    runner._prepare_source(task, workspace / "src")  # src.tgz unpacked, target .git removed (P2, P6)
+    (workspace / "output").mkdir()
+    subprocess.run(["chmod", "-R", "a+rwX", str(workspace)], check=True)
+
+    meta = {
+        "run_id": run_id, "system": SYSTEM, "task": task, "kind": kind, "placement": "runner_container",
+        "requested_model": model, "budget_usd": budget, "timeout_s": timeout_s,
+        "pilot_commit": runner._git_rev(infra.REPO), "cybergym_commit": runner._git_rev(infra.CYBERGYM),
+        "system_commit": COMMIT, "system_argv": scan_argv(repo, model),
+        "role_labeling": "per_phase_proxy_key", "phases": list(PHASES),
+        "gateway_ip": gateway, "runner_image": RUNNER_IMAGE, "started_at": time.time(),
+    }
+    (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
+
+    meta["image_build"] = ensure_image(run_dir)  # setup, before the isolation window
+
+    env = {
+        "OPENANT_PYTHON": "/root/.openant/venv/bin/python",
+        "HOME": "/root",
+    }
+    cmd = ["bash", "-lc",
+           f"install -m600 {IN}/config.json /root/.config/openant/config.json && "
+           f"python3 {IN}/collector.py --state-dir {STATE_DIR} --repo /src/{repo} "
+           f"--scan-dir {SCAN_DIR} --timeout {timeout_s} -- " + " ".join(scan_argv(repo, model))]
+
+    error, exit_code = None, None
+    with isolation.ContainerEventLog(run_dir) as events:
+        events.mark(isolation.SYSTEM_STARTED)
+        container = isolation.start_runner_container(
+            run_id=run_id, system=SYSTEM, image=RUNNER_IMAGE, command=cmd, gateway_ip=gateway, env=env,
+            workdir="/src",
+            volumes={str(workspace / "src"): {"bind": "/src", "mode": "rw"},
+                     str(workspace / "output"): {"bind": "/output", "mode": "rw"},
+                     str(config_path): {"bind": f"{IN}/config.json", "mode": "ro"},
+                     str(COLLECTOR): {"bind": f"{IN}/collector.py", "mode": "ro"}})
+        meta["runner_container"] = container.name
+        try:
+            exit_code = container.wait(timeout=timeout_s + 300)["StatusCode"]
+        except Exception as e:  # timeout or daemon error: recorded, container stopped
+            error = repr(e)
+            container.stop(timeout=10)
+        (run_dir / "runner_stdout.log").write_bytes(container.logs(stdout=True, stderr=False))
+        (run_dir / "runner_stderr.log").write_bytes(container.logs(stdout=False, stderr=True))
+        container.remove(force=True)
+
+    _copy_out(workspace / "output" / "scan", oa / "scan")
+    _copy_out(workspace / "output" / "state", oa / "state")
+
+    findings = []
+    try:
+        findings, extra = collect_findings(oa)
+        (run_dir / "findings.json").write_text(json.dumps({"findings": findings}, indent=2))
+        (run_dir / "extra_steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in extra))
+    except Exception as e:
+        error = (error + "; " if error else "") + f"output adapter: {e!r}"
+
+    spends = {p: infra.key_spend(k) for p, k in phase_keys.items()}
+    meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code,
+                key_spend=spends,
+                total_spend_usd=round(sum((s.get("spend") or 0) for s in spends.values()), 4),
+                outcome=runner._outcome(run_dir, list(phase_keys.values()), budget, error),
+                isolation=events.verdict())
+    (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
+    return run_dir
+
+
+def collect_findings(oa_dir: Path) -> tuple[list[dict], list[dict]]:
+    """Normalized findings and the adapter's extra steps (hand-offs + OpenAnt's
+    own dynamic-test oracle runs) from the scan and state output."""
+    pipeline = _find_one(oa_dir / "scan", "pipeline_output.json")
+    findings = normalize_findings(json.loads(pipeline.read_text())) if pipeline else []
+
+    handoffs = []
+    hpath = oa_dir / "state" / "handoffs.jsonl"
+    if hpath.exists():
+        handoffs = [json.loads(l) for l in hpath.read_text().splitlines() if l.strip()]
+
+    dynamic = _find_one(oa_dir / "scan", "dynamic_test_results.json")
+    dyn = json.loads(dynamic.read_text()) if dynamic else None
+
+    extra = handoff_steps(handoffs) + dynamic_oracle_steps(dyn)
+    return findings, extra
+
+
+def _find_one(root: Path, name: str) -> Path | None:
+    if not root.exists():
+        return None
+    hits = sorted(root.rglob(name))
+    return hits[0] if hits else None
+
+
+def _copy_out(src: Path, dst: Path) -> None:
+    if src.exists():
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def _ensure_proxy(gateway: str) -> None:
+    import httpx
+    from .. import infra
+    try:
+        if httpx.get(f"http://127.0.0.1:{infra.PROXY_PORT}/health/liveliness", timeout=5).status_code == 200:
+            return
+    except httpx.HTTPError:
+        pass
+    infra.ensure_proxy(gateway)
+
+
+if __name__ == "__main__":
+    import sys
+    print(run(sys.argv[1], sys.argv[2], None, 5400))

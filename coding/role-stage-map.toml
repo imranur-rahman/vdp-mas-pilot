@@ -25,3 +25,14 @@ agent = ["S2", "S3", "S4", "S5", "S6", "S7", "S8"]
 
 # Adapter tickets add one table per system (vvah, deepsec, mantis,
 # anthropic-harness, openant, autocve) once the authors have mapped its roles.
+
+# OpenAnt (ticket 09): roles are the seven pipeline phases (the proxy labels
+# each by its own per-run key, D2). Draft mapping — not yet agreed by two
+# authors. `app_context` and `report` make no VDP analysis claim and stay
+# unmapped. A phase with more than one stage leaves the choice to the coder.
+[systems.openant]
+llm_reach = ["S1", "S3"]       # reachability review: entry points and call-chain
+enhance = ["S2"]               # source/sink context enhancement
+analyze = ["S4", "S5"]         # detection: feasibility and verdict
+verify = ["S5"]                # adversarial verification of the verdict
+dynamic_test = ["S6"]          # reproduction and oracle check (Docker exploit)
