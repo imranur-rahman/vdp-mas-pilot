@@ -2,10 +2,10 @@
 until your login session picks up the docker group."""
 
 import argparse
-
+import json
 from pathlib import Path
 
-from . import exporter, infra, runner
+from . import claims, coding, exporter, infra, runner
 
 
 def main():
@@ -27,5 +27,31 @@ def main():
     exp.add_argument("run_dir", type=Path)
     exp.set_defaults(fn=lambda a: print("bundle:", exporter.export(a.run_dir)))
 
+    cl = sub.add_parser("claims", help="extract step claims (Haiku 5.5 through the proxy, T-3) and re-export")
+    cl.add_argument("run_dir", type=Path)
+    cl.add_argument("--budget", type=float, default=1.0, help="hard cap in USD for the extraction key")
+    cl.set_defaults(fn=lambda a: print("bundle:", _export_with_claims(a.run_dir, a.budget)))
+
+    lab = sub.add_parser("labels", help="write a coder's label file for a bundle (coding kit)")
+    lab.add_argument("bundle", type=Path)
+    lab.add_argument("--coder", required=True)
+    lab.add_argument("--out", type=Path, help=f"default: {coding.LABELS_DIR}/<run_id>/<coder>.yaml")
+    lab.set_defaults(fn=lambda a: print("label file:", coding.init_labels(a.bundle, a.coder, a.out)))
+
+    kap = sub.add_parser("kappa", help="Cohen's kappa between two coders' label files")
+    kap.add_argument("first", type=Path)
+    kap.add_argument("second", type=Path)
+    kap.set_defaults(fn=lambda a: print(json.dumps(coding.kappa(a.first, a.second), indent=2)))
+
     args = p.parse_args()
     args.fn(args)
+
+
+def _export_with_claims(run_dir: Path, budget: float) -> Path:
+    """Live claim extraction on a `tooling` key. Its proxy log goes to
+    `<run folder>/claim-extraction/proxy.jsonl`, apart from the run's own log."""
+    run_id = json.loads((run_dir / "run.json").read_text())["run_id"]
+    key = infra.mint_key(run_id=f"{run_id}/claim-extraction", kind="tooling", system="pilot-claims",
+                         budget_usd=budget, role="claim-extractor")
+    extractor = claims.proxy_extractor(f"http://127.0.0.1:{infra.PROXY_PORT}", key)
+    return exporter.export(run_dir, extractor=extractor)

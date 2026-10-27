@@ -161,11 +161,25 @@ def build_findings(run_dir: Path, run: dict, bundle: Path, tasks_dir: Path = DEF
     findings = []
     for f in raw:
         check = check_tp_target(f, run_dir, ground_truth)
-        findings.append({**f, "tp_target_check": check,
+        findings.append({**f, **_copy_files(f, run_dir, bundle), "tp_target_check": check,
                          "verdict": "tp_target" if check["result"] == "pass" else None})
     (bundle / "findings.json").write_text(json.dumps(
         {"ground_truth": GROUND_TRUTH if gt_text is not None else None, "findings": findings}, indent=2))
     return findings
+
+
+def _copy_files(finding: dict, run_dir: Path, bundle: Path) -> dict:
+    """Copy the finding's PoC, patch and stack trace into `findings/<id>/` so the
+    bundle stands alone; the fields then name the bundle copies."""
+    copied = {}
+    for field in ("poc", "patch", "stack_trace"):
+        src = finding.get(field)
+        if src and (run_dir / src).is_file():
+            rel = f"findings/{finding['finding_id']}/{field}{Path(src).suffix}"
+            (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(run_dir / src, bundle / rel)
+            copied[field] = rel
+    return copied
 
 
 def _ground_truth(run_dir: Path, run: dict, tasks_dir: Path) -> str | None:

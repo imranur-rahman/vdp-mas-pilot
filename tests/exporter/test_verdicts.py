@@ -146,9 +146,12 @@ def test_a_report_only_finding_is_checked_by_location_overlap_with_the_known_pat
     assert f["tp_target_check"]["result"] == result
 
 
-def test_the_known_patch_travels_with_the_bundle(tmp_path):
+def test_the_known_patch_and_the_findings_files_travel_with_the_bundle(tmp_path):
     bundle = export(run_folder(tmp_path), tasks_dir=TASKS)
     assert "md_is_container_mark" in (bundle / "oracle" / "ground_truth.patch").read_text()
+    (f,) = bundle_findings(bundle)
+    assert (bundle / f["patch"]).read_text().startswith("--- a/src/md4c.c")
+    assert (bundle / f["poc"]).read_bytes().endswith(b"[a](b")
 
 
 def test_findings_appear_in_the_rendered_trajectory(tmp_path):
