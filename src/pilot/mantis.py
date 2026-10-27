@@ -167,7 +167,18 @@ def _patch_text(db_path: Path, finding_id: str) -> str:
 # --- the run step (host runner container, gVisor tier; accepted by a real run) -
 
 IMAGE = "pilot-runner-mantis:f3162c0"
-CONTEXT_CACHE = Path("/tmp/claude-1002") / "mantis-src"  # host clone at PIN, patches applied
+CONTEXT_CACHE = Path.home() / ".cache" / "pilot" / f"mantis-{PIN[:7]}"  # host clone at PIN (build context)
+
+
+def ensure_source(dest: Path = CONTEXT_CACHE) -> Path:
+    """A host clone of Mantis at PIN, the runner image's build context."""
+    if not (dest / "reference" / "main.py").is_file():
+        dest.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-q", str(dest)], check=True)
+        subprocess.run(["git", "-C", str(dest), "fetch", "-q", "--depth", "1",
+                        "https://github.com/google/mantis", PIN], check=True)
+        subprocess.run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"], check=True)
+    return dest
 
 
 def task_build_image(cybergym: Path, task: str) -> str:
@@ -218,15 +229,14 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
 
     key = infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget)
     cmd = ["python3", "main.py", f"/src/{repo}", "--workflow", "/work/workflow.json",
-           "--db", "/output/knowledge.sqlite", "--max-time", str(timeout_s // 60),
-           "--sessions-db", "/output/sessions.sqlite"]
-    env = {"OPENAI_API_KEY": key, "OPENAI_BASE_URL": f"http://{gateway}:{infra.PROXY_PORT}",
-           "MODEL_ID": "", "GEMINI_API_KEY": "", "DOCKER_HOST": "unix:///var/run/docker.sock"}
+           "--db", "/output/knowledge.sqlite", "--max-time", f"{max(timeout_s // 60 - 5, 5)}m"]
+    env = {"OPENAI_API_KEY": key, "MANTIS_SESSIONS_DB": "/output/sessions.sqlite",
+           "DOCKER_HOST": "unix:///var/run/docker.sock"}
 
     error, exit_code = None, None
     with isolation.ContainerEventLog(run_dir) as events:
         if not runner._image_exists(IMAGE):
-            isolation.build_image(CONTEXT_CACHE, IMAGE, run_dir,
+            isolation.build_image(ensure_source(), IMAGE, run_dir,
                                   dockerfile=str(infra.REPO / "infra/runner/mantis/Dockerfile"))
         events.mark(isolation.SYSTEM_STARTED)
         container = isolation.start_runner_container(
