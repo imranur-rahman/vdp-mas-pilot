@@ -38,6 +38,38 @@ def normalize_findings(file_records: list[dict]) -> list[dict]:
     return out
 
 
+def _iso(ts: str | None) -> float | None:
+    from datetime import datetime
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() if ts else None
+
+
+def code_decisions(setup_state: dict | None) -> list[dict]:
+    """Setup's code-side gates, as recorded in setup-state.json: which files the
+    scans made candidates, the coverage gate, each matcher-repair attempt, and
+    where setup stopped. All run inside `setup --through coverage`."""
+    if not setup_state:
+        return []
+    phases = setup_state.get("phases") or {}
+    done = lambda p: _iso((phases.get(p) or {}).get("completedAt"))
+    out = []
+    if setup_state.get("baselineScanSummary"):
+        out.append({"name": "baseline-scan", "ts": done("baseline-scan"), "output": setup_state["baselineScanSummary"]})
+    report = setup_state.get("coverageReport")
+    if isinstance(report, dict):
+        out.append({"name": "coverage-gate", "ts": done("coverage"),
+                    "output": {"passed": report.get("passed"), "reasons": report.get("reasons")}})
+    for i, attempt in enumerate(setup_state.get("matcherAttempts") or [], 1):
+        out.append({"name": f"matcher-attempt-{i}", "ts": done("matchers"), "output": attempt})
+    if setup_state.get("finalScanSummary"):
+        out.append({"name": "final-scan", "ts": done("final-scan"), "output": setup_state["finalScanSummary"]})
+    if setup_state.get("lastError"):
+        out.append({"name": "setup-stop", "ts": _iso(setup_state["lastError"].get("at")),
+                    "output": setup_state["lastError"]})
+    for d in out:
+        d["role"] = "matcher-generator"
+    return out
+
+
 def _is_c(path: str) -> bool:
     return (path or "").lower().endswith(C_EXTENSIONS)
 

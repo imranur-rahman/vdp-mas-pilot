@@ -64,7 +64,8 @@ def export(run_dir: Path, out_dir: Path | None = None) -> Path:
     base = {"run_id": run["run_id"], "task_id": run["task"], "system": run["system"]}
 
     records = load_proxy_log(run_dir)
-    llm = _merge_by_time(_llm_steps(records, bundle), _handoff_steps(run_dir, bundle))
+    llm = _merge_by_time(_llm_steps(records, bundle),
+                         _handoff_steps(run_dir, bundle) + _decision_steps(run_dir))
     attempts, oracle = _oracle_steps(run_dir, bundle)
     iteration = attempts[-1] if attempts else 1
     steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in llm]
@@ -330,6 +331,25 @@ def _handoff_steps(run_dir: Path, bundle: Path) -> list[dict]:
     return steps
 
 
+def _decision_steps(run_dir: Path) -> list[dict]:
+    """One `code_decision` step per line of `decisions.jsonl` (written by an
+    adapter): {ts, role, name, output}."""
+    path = run_dir / "decisions.jsonl"
+    if not path.exists():
+        return []
+    steps = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        d = json.loads(line)
+        out = d.get("output")
+        steps.append({"step_type": "code_decision", "role": d.get("role"), "ts_start": d.get("ts"),
+                      "ts_end": d.get("ts"),
+                      "output": {"decision": d.get("name"), **out} if isinstance(out, dict)
+                      else {"decision": d.get("name"), "value": out}})
+    return steps
+
+
 def _merge_by_time(llm: list[dict], handoffs: list[dict]) -> list[dict]:
     """Each hand-off goes before the first model call that started after it."""
     out, pending = [], sorted(handoffs, key=lambda h: h["ts_start"] or 0)
@@ -455,6 +475,11 @@ def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str])
                f" {len(ref.get('added') or [])}, changed {len(ref.get('changed') or [])}, removed"
                f" {len(ref.get('removed') or [])}. Diff: {_link(ref.get('diff'))}", ""]
         return out + ([s["output"], ""] if s.get("output") else [])
+    if s["step_type"] == "code_decision":
+        out = dict(s["output"] or {})
+        name = out.pop("decision", None)
+        return [f"## Step {s['seq']} · code_decision · {name} ({s['role']})", "", f"_{_when(s['ts_start'])}_", "",
+                _fence(_cut(json.dumps(out, indent=2)), "json"), ""]
     if s["step_type"] == "oracle_run":
         ref = s["oracle_ref"] or {}
         out = [f"## Step {s['seq']} · oracle_run · CyberGym stage {ref.get('stage')}"

@@ -87,3 +87,16 @@ def test_out_of_scope_evidence_is_rendered(tmp_path):
     (run / "run.json").write_text(json.dumps(meta))
     md = (export(run) / "trajectory.md").read_text()
     assert "out_of_scope" in md and "NO_SCAN_CANDIDATES" in md
+
+
+def test_code_decisions_become_steps_in_time_order(tmp_path):
+    run = make_run(tmp_path)
+    t0 = 1793102400.0
+    (run / "decisions.jsonl").write_text(json.dumps(
+        {"ts": t0 + 6, "role": "matcher-generator", "name": "coverage-gate", "output": {"passed": False}}) + "\n")
+    ss = steps(export(run))
+    assert [s["step_type"] for s in ss] == ["llm_step", "handoff", "code_decision", "llm_step", "handoff"]
+    d = ss[2]
+    assert d["role"] == "matcher-generator"
+    assert d["output"] == {"decision": "coverage-gate", "passed": False}
+    assert "coverage-gate" in (run / "bundle" / "trajectory.md").read_text()

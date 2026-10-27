@@ -2,7 +2,7 @@
 schema in deepsec docs/data-layout.md) become normalized findings, and the
 run's C coverage decides `out_of_scope` (D8)."""
 
-from pilot.deepsec import normalize_findings, scope_evidence
+from pilot.deepsec import code_decisions, normalize_findings, scope_evidence
 
 RECORD = {
     "filePath": "src/md4c.c",
@@ -71,3 +71,36 @@ def test_run_that_never_investigated_c_is_out_of_scope_with_evidence():
     assert ev["setup_stop"] == {"code": "NO_SCAN_CANDIDATES", "message": "Setup paused"}
     assert ev["language_stats"] == {"c": 12, "python": 4}
     assert ev["matcher_attempts"] == state["matcherAttempts"]
+
+
+SETUP_STATE = {
+    "phases": {
+        "baseline-scan": {"status": "complete", "completedAt": "2026-10-27T12:00:30Z"},
+        "coverage": {"status": "complete", "completedAt": "2026-10-27T12:00:31Z"},
+        "matchers": {"status": "complete", "completedAt": "2026-10-27T12:01:00Z"},
+        "final-scan": {"status": "complete", "completedAt": "2026-10-27T12:01:05Z"},
+    },
+    "baselineScanSummary": {"runId": "s1", "languageStats": [{"language": "python", "scannedFiles": 4,
+                                                              "candidates": 0, "matchRate": 0}]},
+    "finalScanSummary": {"runId": "s2", "languageStats": []},
+    "coverageReport": {"passed": False, "reasons": ["surface md-parse has no candidates"]},
+    "matcherAttempts": [{"proposedSlugs": ["c-parser-entry"], "acceptedSlugs": [],
+                         "rejected": [{"slug": "c-parser-entry", "reason": "too broad"}], "outcome": "rescanned"}],
+    "lastError": {"phase": "coverage", "code": "NO_SCAN_CANDIDATES", "message": "paused",
+                  "at": "2026-10-27T12:01:06Z"},
+}
+
+
+def test_setup_gates_become_code_decisions_in_time_order():
+    ds = code_decisions(SETUP_STATE)
+    assert [d["name"] for d in ds] == ["baseline-scan", "coverage-gate", "matcher-attempt-1", "final-scan",
+                                       "setup-stop"]
+    assert [d["ts"] for d in ds] == sorted(d["ts"] for d in ds)
+    assert ds[1]["output"] == {"passed": False, "reasons": ["surface md-parse has no candidates"]}
+    assert ds[2]["output"]["rejected"] == [{"slug": "c-parser-entry", "reason": "too broad"}]
+    assert ds[4]["output"]["code"] == "NO_SCAN_CANDIDATES"
+    assert all(d["role"] == "matcher-generator" for d in ds)
+
+
+def test_no_setup_state_means_no_code_decisions():
+    assert code_decisions(None) == []

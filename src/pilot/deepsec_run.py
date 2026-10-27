@@ -192,6 +192,9 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
     meta["commands"] = commands
     _write_findings(run_dir, script_path / "patch.diff", data_path / "src.tgz", config["repo_to_patch"])
     outcome = runner._outcome(run_dir, minted, budget, error)
+    _, setup_state = _records(run_dir, config["repo_to_patch"])
+    (run_dir / "decisions.jsonl").write_text(
+        "".join(json.dumps(d) + "\n" for d in deepsec.code_decisions(setup_state)))
     evidence = _scope(run_dir, config["repo_to_patch"])
     meta["scope_evidence"] = evidence
     if outcome["outcome"] == "completed" and evidence["out_of_scope"] and not error:
