@@ -57,6 +57,8 @@ def decide_outcome(base: str, commands: list[dict], evidence: dict, error: str |
     stopped the commands is the adapter's problem, not the system's."""
     if base in ("budget_exhausted", "refused"):
         return base
+    if any(c.get("skipped") == "budget exhausted" for c in commands):
+        return "budget_exhausted"
     stops = [c.get("setup_stop") or {} for c in commands if c.get("exit_code")]
     if error or (stops and stops[-1].get("code") not in SCOPE_STOPS):
         return "adapter_error"

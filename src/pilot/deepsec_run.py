@@ -24,6 +24,7 @@ the remaining roles never run, as for any deepsec user.
 import io
 import json
 import shlex
+import shutil
 import subprocess
 import tarfile
 import time
@@ -161,8 +162,8 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
             spent = sum((infra.key_spend(k).get("spend") or 0) for k in minted)
             remaining_budget = round(budget - spent, 4)
             if remaining_time <= 60 or remaining_budget <= 0:
-                commands.append({"role": role, "skipped": "time or budget exhausted",
-                                 "remaining_budget": remaining_budget})
+                commands.append({"role": role, "remaining_budget": remaining_budget,
+                                 "skipped": "budget exhausted" if remaining_budget <= 0 else "time exhausted"})
                 break
             key = infra.mint_key(run_id=run_id, kind=kind, system="deepsec", budget_usd=remaining_budget, role=role)
             minted.append(key)
@@ -195,6 +196,10 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
 
     meta["commands"] = commands
     _write_findings(run_dir, data_path / "src.tgz", config["repo_to_patch"])
+    # The known patch travels with the run, so the tp_target check never
+    # depends on where the run folder is exported (verdicts.py reads it first).
+    (run_dir / "ground_truth").mkdir(exist_ok=True)
+    shutil.copyfile(script_path / "patch.diff", run_dir / "ground_truth" / "patch.diff")
     outcome = runner._outcome(run_dir, minted, budget, error)
     _, setup_state = _records(run_dir, config["repo_to_patch"])
     (run_dir / "decisions.jsonl").write_text(

@@ -139,6 +139,13 @@ def test_a_run_broken_by_setup_problems_is_not_out_of_scope():
     assert decide_outcome("completed", [], OUT, error="RuntimeError('install')") == "adapter_error"
 
 
+def test_a_role_skipped_because_the_cap_was_spent_means_budget_exhausted():
+    cmds = ALL_OK[:3] + [{"role": "revalidator", "skipped": "budget exhausted"}]
+    assert decide_outcome("completed", cmds, IN, error=None) == "budget_exhausted"
+    cmds = ALL_OK[:3] + [{"role": "revalidator", "skipped": "time exhausted"}]
+    assert decide_outcome("completed", cmds, IN, error=None) == "completed"
+
+
 def test_budget_and_refusal_outcomes_win():
     assert decide_outcome("budget_exhausted", ALL_OK[:2], OUT, error=None) == "budget_exhausted"
     assert decide_outcome("refused", ALL_OK[:1], OUT, error=None) == "refused"
