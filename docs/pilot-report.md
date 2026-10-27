@@ -205,26 +205,30 @@ and a draft stage map.
 
 **deepsec**
 
-- The system-prompt hash differs on every call (87 calls, 83 distinct
-  hashes) although the system text is identical. The likely cause is the
-  per-request `x-anthropic-billing-header:` line from the Agent SDK's bundled
-  Claude Code. The effects:
-  - every call is its own `agent_instance_id`;
-  - steps carry their full input, not a delta.
-  Roles are unaffected, since they come from the per-command keys.
+- **Resolved on re-export (review fixes):** the system-prompt hash differed
+  on every call (87 calls, 83 distinct hashes). Two causes: the per-request
+  `x-anthropic-billing-header:` line from the Agent SDK's bundled Claude
+  Code, and the SDK's mid-conversation `system` messages, which were counted
+  as prompt. The proxy now hashes without both, and the exporter recomputes
+  the same hash from the logged request. The re-exported bundle has 2 prompt
+  ids, 10 agent instances (was 87), and 77 of 87 steps carry an input delta
+  (was 0). Roles were never affected (per-command keys).
 - **No thinking summaries (0 of 87 calls).** The client sends `thinking:
-  {type: adaptive, display: "updates"}`, and the proxy hook leaves a
+  {type: adaptive, display: "updates"}`, and the proxy hook left a
   client-set `display` unchanged. The upstream thinking blocks therefore
   arrive with signatures only (77 blocks, no thinking text). This breaks M-1
-  for deepsec. Fix: have the proxy override `display` to `summarized` (proxy
-  change, no re-run of the pilot needed).
+  for this deepsec run. **Fixed for future runs:** the proxy now always sets
+  `summarized` on adaptive thinking (M-1) and logs the client's value; the
+  existing data run cannot get summaries back without a re-run.
 - 42 of 87 steps have `stage_options`, from dual-stage roles; the coder
   chooses.
 
 **Anthropic harness**
 
-- The same prompt-hash variance as deepsec (92 calls, 92 hashes). Agent
-  instances still come from the native stream-json transcripts (5 agents).
+- **Resolved on re-export:** the same prompt-hash variance as deepsec (92
+  calls, 92 hashes). The re-exported bundle has 2 prompt ids, and 82 of 92
+  steps carry an input delta (was 0). Agent instances come from the native
+  stream-json transcripts (5 agents), as before.
 - No role-to-stage table, so 0 of 92 steps have a stage.
 - The harness's patch grader fails to build under gVisor. This is listed
   under the findings above.
@@ -278,26 +282,31 @@ The remaining R-1-related gaps are:
 1. **OpenRouter actual cost is missing for non-streamed calls** (VVAH,
    OpenAnt). Only LiteLLM's estimate exists, priced at the >100k tier.
    Budget caps use the estimate for every system (about 1–5× actual).
+   *Partly fixed:* `run_outcome` now reads `usage.cost` from non-streamed
+   responses too, but no logged non-streamed response carries it (LiteLLM's
+   response drops it), so no figure changed. Still open: ask OpenRouter for
+   it and keep it in the raw record.
 2. **Thinking summaries depend on the client.** They are absent where the
    system disables thinking (VVAH, AutoCVE, OpenAnt). They are also absent
-   where the client sets its own `display` (deepsec, `updates`). Summaries
-   are model-written summaries, never the reasoning itself (M-1).
+   where the client sets its own `display` (deepsec, `updates`; *fixed for
+   future runs*: the proxy now overrides it). Summaries are model-written
+   summaries, never the reasoning itself (M-1).
 3. **LiteLLM's reassembled stream drops the thinking text.** The proxy keeps
    the raw stream events to work around it (ticket 01).
 
 ### Instrumentation threats
 
-4. **The Agent-SDK prompt hash varies per call** (deepsec, harness) because
-   of the billing-header line. Prompt-hash role identification and input
-   deltas fail for these systems. Per-role keys and native transcripts
-   compensate.
-5. **Per-role keys in the harness and deepsec do not share one run budget.**
-   The two systems handle it differently:
-   - deepsec mints each command's key with what is left of the cap, so a
-     run can exceed its cap by one command's in-flight overshoot.
-   - The harness gives each of its 7 role keys the full cap
-     (`harness_run.py`), so in principle a run could spend up to 7× its cap.
-   AutoCVE's keys share one LiteLLM team budget, which is the fix to copy.
+4. ~~**The Agent-SDK prompt hash varies per call** (deepsec, harness)
+   because of the billing-header line.~~ *Resolved:* the proxy and the
+   exporter hash the prompt without that line and without mid-conversation
+   `system` messages; the existing bundles were re-exported (deepsec 2
+   prompt ids and 77/87 delta steps; harness 2 and 82/92).
+5. ~~**Per-role keys in the harness and deepsec do not share one run
+   budget.**~~ *Resolved for future runs:* every adapter now mints its keys
+   through `infra.mint_keys`, one LiteLLM team per run whose budget is the
+   cap. In the pilot's data runs deepsec gave each command what was left of
+   the cap and the harness gave each of its 7 role keys the full cap; no data
+   run came near $20, so no figure is affected.
 6. **The isolation verdict attributes containers by time window.** Any
    concurrent Docker work makes a run `invalid`, which forces runs to be
    serial. This drives the full study's wall-clock.
@@ -350,6 +359,25 @@ The remaining R-1-related gaps are:
 - **`adapter_error` is accepted as a fifth run outcome:** a run stopped by
   our adapter, not the system. Recorded in `docs/DECISIONS.md` and
   `GLOSSARY.md`.
+
+## Review fixes (2026-10-27)
+
+- **Outcome rule.** `run_outcome` now returns `adapter_error` when the
+  adapter raised (other than the run's time limit) or the run made no model
+  call; budget exhaustion and a final refusal still take precedence. No data
+  run changes outcome (the harness data run's recorded error is its time
+  limit, so it stays `completed`). Three development runs with no model
+  call would now be `adapter_error`: VVAH `20261027T011027`, Mantis
+  `20261027T125335` and `20261027T130004`. Their `run.json` files were not
+  rewritten.
+- **Re-export.** All 14 bundled runs (six data runs, the superseded Mantis
+  data run, seven dev runs) were re-exported with no model spend. Step
+  counts by type are unchanged for every data run; only deepsec's and the
+  harness's prompt ids, agent instances and input deltas changed (above).
+  OpenRouter actual costs are unchanged.
+- **`tp_target` location check.** Ground-truth hunks with no function in
+  their header now match by line overlap. The md4c patch's hunk names
+  `md_is_container_mark`, so no verdict changes.
 
 ## Total pilot spend against the $200 budget
 
@@ -426,13 +454,16 @@ for OpenAnt, whose $4 dev cap was hit in `analyze`.
 ## Before the full study (not blocking coding)
 
 - Proxy:
-  - hash system prompts without the `x-anthropic-billing-header:` line;
-  - override client `display` values so deepsec gets summaries;
+  - ~~hash system prompts without the `x-anthropic-billing-header:` line~~
+    (done);
+  - ~~override client `display` values so deepsec gets summaries~~ (done);
   - record OpenRouter's cost for non-streamed calls (e.g. ask OpenRouter for
-    `usage: {include: true}` and keep it in the raw record).
+    `usage: {include: true}` and keep it in the raw record). The outcome
+    already reads it from non-streamed responses once it is there.
 - Exporter: fill `role_source` for ADK-span roles (Mantis), and render
   titles for VVAH's code decisions and hand-offs.
-- Budget: decide whether per-role keys (harness, deepsec) share one team
-  budget, as AutoCVE's do.
+- ~~Budget: decide whether per-role keys (harness, deepsec) share one team
+  budget, as AutoCVE's do.~~ Done: one team budget per run for every
+  adapter (`infra.mint_keys`).
 - Isolation: attribute containers by label or ancestry, not time window, if
   runs are to go in parallel.
