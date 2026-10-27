@@ -188,10 +188,10 @@ async def _run(args) -> dict:  # pragma: no cover - needs AutoCVE
     from app.models.agent_task import AgentTask, AgentFinding
     from app.services.agent.agents.orchestrator import OrchestratorAgent
 
-    run_dir = Path(args.run_dir)
-    keys = json.loads(Path(args.keys).read_text())
-    recorder = HandoffRecorder(run_dir / "captures", Path(args.db), Path(args.projects_root) / ".auditai_workspaces")
-    instrument(OrchestratorAgent, recorder, DecisionLog(run_dir / "decisions.jsonl"))
+    work = Path(args.work_dir)
+    keys = json.loads(os.environ["PILOT_AUTOCVE_KEYS"])
+    recorder = HandoffRecorder(work / "captures", Path(args.db), Path(args.projects_root) / ".auditai_workspaces")
+    instrument(OrchestratorAgent, recorder, DecisionLog(work / "decisions.jsonl"))
 
     async with engine.begin() as conn:  # SQLite: tables from the models, not the Postgres migrations
         await conn.run_sync(Base.metadata.create_all)
@@ -237,11 +237,10 @@ def main():  # pragma: no cover - runs inside the runner container
     import asyncio
 
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--run-dir", required=True)
+    p.add_argument("--work-dir", required=True, help="the run folder's autocve/ (all this script writes)")
     p.add_argument("--source", required=True, help="task source, inside --projects-root")
     p.add_argument("--projects-root", required=True, help="AutoCVE's MANAGED_PROJECTS_ROOT")
     p.add_argument("--db", required=True)
-    p.add_argument("--keys", required=True, help="JSON file: role -> proxy key")
     p.add_argument("--base-url", required=True)
     p.add_argument("--model", required=True)
     p.add_argument("--version-label", default="cybergym-task")
@@ -263,7 +262,7 @@ def main():  # pragma: no cover - runs inside the runner container
     })
     sys.path.insert(0, os.getcwd())
     result = asyncio.run(_run(args))
-    Path(args.run_dir, "autocve", "result.json").write_text(json.dumps(result, indent=2, default=str))
+    Path(args.work_dir, "result.json").write_text(json.dumps(result, indent=2, default=str))
     print(json.dumps(result, default=str))
 
 

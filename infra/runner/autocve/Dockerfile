@@ -6,7 +6,8 @@
 # pilot.isolation.build_image (registry allowlist, logged).
 #
 # Follows AutoCVE's own backend/Dockerfile (Python 3.12, requirements-lock.txt,
-# editable install) minus the Postgres client and the CJK fonts, plus aiosqlite
+# editable install, no compiler at runtime) minus the Postgres client and the
+# CJK fonts, plus aiosqlite
 # (SQLite driver, P3(c)). No web UI, Redis, or Postgres.
 FROM python:3.12-slim-bookworm
 
@@ -25,6 +26,10 @@ RUN python -m venv /app/.venv \
  && /app/.venv/bin/pip install -q --retries 5 "aiosqlite==0.21.0"
 COPY autocve/backend/ /app/
 RUN /app/.venv/bin/pip install -q --no-deps -e . && /app/.venv/bin/python -c "import app.main"
+# gcc only builds wheels: AutoCVE's runtime stage has no compiler (its Bash tool
+# runs here), so neither does this image. C code is compiled in its sandbox.
+RUN apt-get purge -y -qq gcc libffi-dev >/dev/null && apt-get autoremove -y -qq >/dev/null \
+ && ! command -v gcc
 
 # tiktoken would download its encoding at first use; the runner has no internet.
 COPY tiktoken/ /opt/tiktoken/

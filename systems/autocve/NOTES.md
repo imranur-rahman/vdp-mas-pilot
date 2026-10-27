@@ -18,7 +18,16 @@
   `pilot-runner-autocve:b26025f`, `infra/runner/autocve/Dockerfile`, built
   through the registry allowlist). It gets the host's Docker socket so that
   AutoCVE can start its own sandbox containers; the run folder is mounted at its
-  host path, so the bind mounts AutoCVE asks for name real host paths.
+  host path, so the bind mounts AutoCVE asks for name real host paths. Only the
+  run folder's `autocve/` is mounted (source copy, SQLite DB, captures), never
+  the proxy log; the role keys come in through an environment variable.
+- **Two execution places:** the finding/triage agents' `Bash`, `Read`, `Grep`
+  tools run in the runner container itself (AutoCVE's backend process), while
+  `sandbox_exec` and the verification tools run in AutoCVE's sandbox
+  containers. As in AutoCVE's own backend image, the runner has no C compiler
+  (gcc is purged after building wheels); the sandbox image has gcc/clang.
+  Dev run 2 (before the purge) showed the finding agent trying `gcc
+  -fsanitize=address` through `Bash` in the runner.
 - **Headless start (`autocve_start.py`):** no web UI, Redis or Postgres.
   SQLite through `aiosqlite` (added to the image), tables created from the
   models (the Alembic migrations are Postgres-only). The script calls

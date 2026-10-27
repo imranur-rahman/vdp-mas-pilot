@@ -25,7 +25,11 @@ from pathlib import Path
 from .. import state
 
 SYSTEM = "autocve"
-CAPTURES = "captures"
+# Everything the runner container sees of the run folder is under `autocve/`
+# (mounted at its host path); the proxy log and the rest stay out of its reach.
+WORK = "autocve"
+CAPTURES = f"{WORK}/captures"
+DECISIONS = f"{WORK}/decisions.jsonl"
 
 
 # --- state ------------------------------------------------------------------------
@@ -33,7 +37,7 @@ CAPTURES = "captures"
 def _rows(db: Path) -> dict[str, bytes]:
     """One JSON-lines file per table (empty for an empty table), rows in insertion order."""
     out = {}
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{db}?immutable=1", uri=True)  # a finished copy; WAL needs no -shm then
     try:
         tables = [r[0] for r in con.execute(
             "select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name")]
@@ -89,7 +93,7 @@ def write_handoffs(run_dir: Path, manifest: list[dict]) -> None:
     """`handoffs.jsonl` (the collector format the exporter reads) from the state
     manifest and the start script's `decisions.jsonl`."""
     from ..deepsec import handoff_records
-    path = Path(run_dir) / "decisions.jsonl"
+    path = Path(run_dir) / DECISIONS
     decisions = [json.loads(l) for l in path.read_text().splitlines() if l.strip()] if path.exists() else []
     records = handoff_records(manifest, decisions)
     db_of = {e["seq"]: e.get("db") for e in manifest}
@@ -192,7 +196,7 @@ COMMIT = "b26025f"  # HEAD of main on 2026-10-27 (merge of PR #42)
 PATCHES_DIR = Path(__file__).resolve().parents[3] / "systems" / SYSTEM / "patches"
 RUNNER_DOCKERFILE = Path(__file__).resolve().parents[3] / "infra" / "runner" / SYSTEM / "Dockerfile"
 START_SCRIPT = Path(__file__).with_name("autocve_start.py")
-RUNNER_IMAGE = f"pilot-runner-autocve:{COMMIT}"
+RUNNER_IMAGE = f"pilot-runner-autocve:{COMMIT}-2"  # -2: no gcc in the runtime, as upstream
 SANDBOX_IMAGE = f"autocve-sandbox:{COMMIT}"
 TIKTOKEN_URL = "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 
@@ -267,7 +271,7 @@ ROLES = ("orchestrator", "recon", "scan", "triage", "finding", "verification", "
 def finding_rows(db: Path) -> list[dict]:
     if not Path(db).exists():
         return []
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{db}?immutable=1", uri=True)  # a finished copy; WAL needs no -shm then
     con.row_factory = sqlite3.Row
     try:
         return [dict(r) for r in con.execute("select * from agent_findings order by created_at, rowid")]
@@ -345,14 +349,12 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     for d in ("db", "tmp"):
         (work / d).mkdir(parents=True)
     keys = infra.mint_role_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget, roles=list(ROLES))
-    keys_file = work / "keys.json"
-    keys_file.write_text(json.dumps(keys))
     subprocess_chmod(run_dir)
 
-    cmd = ["/app/.venv/bin/python", "/opt/pilot/autocve_start.py", "--run-dir", str(run_dir),
+    cmd = ["/app/.venv/bin/python", "/opt/pilot/autocve_start.py", "--work-dir", str(work),
            "--source", str(source), "--projects-root", str(projects_root), "--db", str(work / "db" / "autocve.db"),
-           "--keys", str(keys_file), "--base-url", base_url, "--model", model, "--timeout", str(timeout_s)]
-    env = {"SANDBOX_IMAGE": SANDBOX_IMAGE, "TMPDIR": str(work / "tmp"), "HOME": str(work / "tmp")}
+           "--base-url", base_url, "--model", model, "--timeout", str(timeout_s)]
+    env = {"PILOT_AUTOCVE_KEYS": json.dumps(keys), "SANDBOX_IMAGE": SANDBOX_IMAGE, "TMPDIR": str(work / "tmp"), "HOME": str(work / "tmp")}
     error, exit_code = None, None
     with isolation.ContainerEventLog(run_dir) as events:
         try:
@@ -364,7 +366,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
             container = isolation.start_runner_container(
                 run_id=run_id, system=SYSTEM, image=RUNNER_IMAGE, command=cmd, gateway_ip=gateway, env=env,
                 workdir="/app", user="root",
-                volumes={str(run_dir): {"bind": str(run_dir), "mode": "rw"},
+                volumes={str(work): {"bind": str(work), "mode": "rw"},
                          "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
                          # the start script from this checkout, so that it never lags the image
                          str(START_SCRIPT): {"bind": "/opt/pilot/autocve_start.py", "mode": "ro"}})
@@ -380,7 +382,6 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         except Exception as e:  # recorded, not swallowed silently
             error = (error + "; " if error else "") + repr(e)
         meta["agent_finished_at"] = time.time()
-    keys_file.unlink(missing_ok=True)
     subprocess_chmod(run_dir)
 
     findings = []

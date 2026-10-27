@@ -10,6 +10,7 @@ from pilot.adapters import autocve, autocve_start
 
 def _db(path):
     con = sqlite3.connect(path)
+    con.execute("PRAGMA journal_mode=WAL")  # as the start script sets it
     con.execute("create table agent_findings (id text primary key, title text, file_path text)")
     con.commit()
     return con
@@ -20,7 +21,7 @@ def test_database_rows_captured_at_handoffs_become_state_diffs(tmp_path):
     ws.mkdir()
     (ws / "md4c.c").write_text("int x;\n")
     con = _db(tmp_path / "autocve.db")
-    rec = autocve_start.HandoffRecorder(run / "captures", tmp_path / "autocve.db", ws)
+    rec = autocve_start.HandoffRecorder(run / autocve.CAPTURES, tmp_path / "autocve.db", ws)
 
     rec.capture("dispatch-finding", from_role="orchestrator", to_role="finding")
     con.execute("insert into agent_findings values ('f1', 'OOB read in md_is_container_mark', 'src/md4c.c')")
@@ -28,6 +29,7 @@ def test_database_rows_captured_at_handoffs_become_state_diffs(tmp_path):
     (ws / ".autocve").mkdir()
     (ws / ".autocve" / "scan.json").write_text("{}\n")
     rec.capture("return-finding", from_role="finding", to_role="orchestrator", note="1 finding")
+    (run / autocve.CAPTURES).chmod(0o555)  # written by root in the runner container
 
     manifest = autocve.build_state(run)
 
@@ -39,7 +41,7 @@ def test_database_rows_captured_at_handoffs_become_state_diffs(tmp_path):
     diff = (run / second["diff"]).read_text()
     assert any(l.startswith("+") and "OOB read in md_is_container_mark" in l for l in diff.splitlines())
     # the database file itself is kept for replay, one copy per capture
-    copy = sqlite3.connect(run / second["db"])
+    copy = sqlite3.connect(f"file:{run / second['db']}?immutable=1", uri=True)
     assert copy.execute("select title from agent_findings").fetchall() == [("OOB read in md_is_container_mark",)]
 
 
@@ -163,8 +165,8 @@ def test_orchestrator_handoffs_are_captured_and_its_code_decisions_logged(tmp_pa
 
     db = tmp_path / "autocve.db"
     _db(db).close()
-    rec = autocve_start.HandoffRecorder(tmp_path / "run" / "captures", db, tmp_path / "ws")
-    autocve_start.instrument(Orchestrator, rec, autocve_start.DecisionLog(tmp_path / "run" / "decisions.jsonl"))
+    rec = autocve_start.HandoffRecorder(tmp_path / "run" / autocve.CAPTURES, db, tmp_path / "ws")
+    autocve_start.instrument(Orchestrator, rec, autocve_start.DecisionLog(tmp_path / "run" / autocve.DECISIONS))
 
     assert asyncio.run(Orchestrator().run()) == [{"title": "OOB"}]  # behavior unchanged
 
@@ -174,7 +176,7 @@ def test_orchestrator_handoffs_are_captured_and_its_code_decisions_logged(tmp_pa
         ("finding", "orchestrator"), ("orchestrator", "scan"), ("scan", "orchestrator"),
         ("orchestrator", "triage"), ("triage", "orchestrator")]
     assert "findings=1; handoff: finding done" in manifest[3]["note"]
-    decisions = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    decisions = [json.loads(l) for l in (tmp_path / "run" / autocve.DECISIONS).read_text().splitlines()]
     assert [d["name"] for d in decisions] == ["resolve_workflow_state", "build_execution_plan", "merge_findings",
                                              "select_findings_for_verification", "finalize_findings"]
     assert decisions[3]["output"]["selected"][0]["title"] == "OOB"
@@ -203,12 +205,12 @@ def test_handoffs_and_code_decisions_reach_the_bundle(tmp_path):
                                               "kind": "dev", "outcome": {"outcome": "completed"}}))
     db = tmp_path / "autocve.db"
     con = _db(db)
-    rec = autocve_start.HandoffRecorder(run / "captures", db, tmp_path / "ws")
+    rec = autocve_start.HandoffRecorder(run / autocve.CAPTURES, db, tmp_path / "ws")
     rec.capture("to-finding", from_role="orchestrator", to_role="finding")
     con.execute("insert into agent_findings values ('f1', 'OOB read', 'src/md4c.c')")
     con.commit()
     rec.capture("from-finding", from_role="finding", to_role="orchestrator", note="findings=1")
-    autocve_start.DecisionLog(run / "decisions.jsonl").write("select_findings_for_verification",
+    autocve_start.DecisionLog(run / autocve.DECISIONS).write("select_findings_for_verification",
                                                              {"candidates_in": 1, "selected": []})
     autocve.build_state(run)
 
@@ -216,6 +218,6 @@ def test_handoffs_and_code_decisions_reach_the_bundle(tmp_path):
     handoffs = [s for s in steps if s["step_type"] == "handoff"]
     assert [(s["role"], s["state_ref"]["to_role"]) for s in handoffs] == [
         ("orchestrator", "finding"), ("finding", "orchestrator")]
-    assert handoffs[1]["state_ref"]["db"] == "captures/02-from-finding.sqlite"
+    assert handoffs[1]["state_ref"]["db"] == "autocve/captures/02-from-finding.sqlite"
     [decision] = [s for s in steps if s["step_type"] == "code_decision"]
     assert decision["state_ref"]["decision"] == "select_findings_for_verification"
