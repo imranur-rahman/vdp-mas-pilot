@@ -7,7 +7,7 @@ the date, and the reason in place; do not delete the question.
 |---|---|---|---|
 | D1 | Where each system runs | **settled** | Task container: deepsec (Node 22 pre-installed), VVAH. Host runner container (P7): Anthropic harness (target Dockerfile `FROM` the task image, egress proxy allows only LiteLLM), AutoCVE (headless script on SQLite; Semgrep/npm audit off the internet network), OpenAnt (dynamic test on, registry exception), Mantis (`--sandbox gvisor` with the task image) |
 | D2 | Role labeling: model alias per (system, role), system-prompt fingerprint, or both | open | |
-| D3 | Trace store: Arize Phoenix or Langfuse | open | |
+| D3 | Trace store | **settled** | Arize Phoenix, as `method.tex` (Instrumentation) states. Review and judge input format: round 3 (Q11) |
 | D4 | Schema of one step record, and the source (proxy, native trace, artifact) of each field — fields from `sections/method.tex` "Instrumentation and Trace Collection" | open | |
 | D5 | Artifact snapshots: end of run only, or at each stage boundary | open | |
 | D6 | Pilot model (Claude, since the harness is Claude-only) and dollar budget per run | partly settled | Model: Claude Sonnet 5.5 everywhere (P4). Budget: open |
