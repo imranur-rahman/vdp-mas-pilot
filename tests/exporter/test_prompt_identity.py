@@ -29,7 +29,9 @@ def test_calls_that_differ_only_in_the_billing_header_share_a_prompt_and_an_agen
         "run_id": "R", "system": "claude-code", "task": "md4c/arvo_31332", "kind": "dev",
         "outcome": {"outcome": "completed"}}))
     first = [{"role": "user", "content": "find a bug"}]
-    second = first + [{"role": "assistant", "content": "ok"}, {"role": "user", "content": "go on"}]
+    # The Agent SDK also sends mid-conversation `system` messages: conversation, not prompt.
+    second = first + [{"role": "system", "content": "reminder"}, {"role": "assistant", "content": "ok"},
+                      {"role": "user", "content": "go on"}]
     t = time.time()
     records = [_call("c1", "11111", "aaaa", first, t), _call("c2", "22222", "bbbb", second, t + 5)]
     (run_dir / "proxy.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
@@ -40,4 +42,4 @@ def test_calls_that_differ_only_in_the_billing_header_share_a_prompt_and_an_agen
               if s["step_type"] == "llm_step"]
     assert s1["prompt_id"] == s2["prompt_id"]
     assert s1["agent_instance_id"] == s2["agent_instance_id"]
-    assert [m["role"] for m in s2["input_delta"]] == ["assistant", "user"]
+    assert [m["role"] for m in s2["input_delta"]] == ["system", "assistant", "user"]

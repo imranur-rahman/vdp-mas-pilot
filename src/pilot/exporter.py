@@ -448,10 +448,13 @@ def _system_prompt_text(data: dict) -> str:
         parts.append(system)
     elif isinstance(system, list):
         parts += [b.get("text", "") for b in system if isinstance(b, dict)]
+    # Only the leading system messages (OpenAI format) are the prompt; later
+    # ones (the Agent SDK's mid-conversation reminders) are conversation.
     for m in data.get("messages") or []:
-        if isinstance(m, dict) and m.get("role") == "system":
-            c = m.get("content")
-            parts.append(c if isinstance(c, str) else json.dumps(c, sort_keys=True))
+        if not (isinstance(m, dict) and m.get("role") == "system"):
+            break
+        c = m.get("content")
+        parts.append(c if isinstance(c, str) else json.dumps(c, sort_keys=True))
     return "\n".join(parts)
 
 

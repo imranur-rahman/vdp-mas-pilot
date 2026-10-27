@@ -64,8 +64,10 @@ def test_client_display_is_overridden_to_summarized_and_the_original_logged(prox
 
 def test_prompt_hash_ignores_claude_codes_per_request_billing_header(proxy, upstream, make_key):
     key = make_key(pilot_run_id="t-billing", pilot_run_kind="dev")
-    for cch in ("11111", "22222"):
-        messages(proxy, key, system=[
+    later_turn = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"},
+                  {"role": "system", "content": "a mid-conversation reminder"}, {"role": "user", "content": "go"}]
+    for cch, turn in (("11111", None), ("22222", later_turn)):
+        messages(proxy, key, **({"messages": turn} if turn else {}), system=[
             {"type": "text", "text": f"x-anthropic-billing-header: cc_version=2.1.91.1cd; cch={cch};"},
             {"type": "text", "text": "You are a Claude agent."}])
     messages(proxy, key, system=[{"type": "text", "text": "You are another agent."}])
