@@ -22,7 +22,9 @@ The paper repository is an Overleaf git remote; keep all pilot code here.
 | `docs/ENVIRONMENT.md` | State of the run machine and setup checklist |
 | `GLOSSARY.md` | Paper terms (run, agent, role, stage, hand-off, trace, claim) |
 | `systems/<name>/NOTES.md` | Per-system facts; later the run adapter, output adapter, collector |
-| `.scratch/tickets/` | Local markdown ticket tracker (T1–T8) |
+| `.scratch/pilot/` | Spec and tickets 01–12 (local markdown tracker) |
+| `docs/adr/` | Architecture decision records |
+| `CLAUDE.md`, `docs/agents/` | Agent-skill configuration |
 | `runs/`, `traces/` | Run outputs and exported traces (git-ignored) |
 
 ## Systems
