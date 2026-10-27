@@ -151,7 +151,9 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
 
     gateway = infra.ensure_firewall()
     infra.ensure_proxy(gateway)
-    keys = {role: infra.mint_key(run_id=f"{run_id}/{role}", kind=kind, system=SYSTEM,
+    # One key per role (distinct alias, same run id) so the proxy labels finder
+    # vs grader vs the rest (D2) while still logging to one proxy.jsonl per run.
+    keys = {role: infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM,
                                  budget_usd=budget, role=role) for role in KEY_ROLES}
 
     meta = {
@@ -192,7 +194,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         meta["agent_started_at"] = time.time()
         rc = subprocess.run(
             [str(py), "-m", "harness.cli", "run", str(target_dir), "--model", model,
-             "--runs", "1", "--results-dir", str(results_root), "--max-turns", "200"],
+             "--runs", "1", "--stream", "--results-dir", str(results_root),
+             "--max-turns", "200", "--report-max-turns", "60"],
             cwd=harness_src, env=env, capture_output=True, text=True, timeout=timeout_s)
         (run_dir / "harness_run.log").write_text(rc.stdout + "\n--- stderr ---\n" + rc.stderr)
         batches = sorted(results_root.glob(f"{Path(target_dir).name}/*")) or sorted(results_root.glob("*/*"))
