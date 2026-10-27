@@ -1,0 +1,3 @@
+# P1: no domain is allowed. The agent reaches only the host gateway (LiteLLM),
+# which bypasses Squid via NO_PROXY. Squid needs one entry, so this cannot resolve.
+pilot-no-egress.invalid

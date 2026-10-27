@@ -1,0 +1,58 @@
+# Proxy stack: LiteLLM (with Postgres for per-run budgeted keys) and Phoenix.
+# Postgres and Phoenix are bound to localhost only: agents on cybergym-internal
+# can reach the host's gateway IP directly, so only LiteLLM is forwarded there.
+#
+#   PILOT_GATEWAY_IP=<cybergym-internal gateway> docker compose --env-file ../.env up -d
+name: pilot
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_DB: litellm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 3s
+      retries: 20
+
+  phoenix:
+    image: arizephoenix/phoenix:version-20.21.4
+    ports: ["127.0.0.1:${PILOT_PHOENIX_PORT:-6006}:6006"]
+    volumes: [phoenix:/mnt/data]
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.4
+    command: ["--config", "/app/pilot/config.yaml", "--port", "4000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?}
+      DATABASE_URL: postgresql://litellm:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      PILOT_UPSTREAM_BASE: ${PILOT_UPSTREAM_BASE:-https://openrouter.ai/api}
+      PILOT_RUNS_DIR: /runs
+      PHOENIX_COLLECTOR_HTTP_ENDPOINT: http://phoenix:6006/v1/traces
+      STORE_MODEL_IN_DB: "False"
+    volumes:
+      - ./litellm:/app/pilot:ro
+      - ${PILOT_RUNS_DIR:-../runs}:/runs
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["127.0.0.1:${PILOT_PROXY_PORT:-4000}:4000"]
+
+  # Agents on cybergym-internal reach the host only at the network's gateway IP;
+  # Docker's own port publishing to a container is dropped for internal
+  # networks, so a host-network forwarder listens there instead.
+  gateway-forward:
+    image: alpine/socat:1.8.1.1
+    network_mode: host
+    depends_on: [litellm]
+    command: ["TCP-LISTEN:${PILOT_PROXY_PORT:-4000},bind=${PILOT_GATEWAY_IP:-127.0.0.2},fork,reuseaddr",
+              "TCP:127.0.0.1:${PILOT_PROXY_PORT:-4000}"]
+
+volumes:
+  pgdata:
+  phoenix:

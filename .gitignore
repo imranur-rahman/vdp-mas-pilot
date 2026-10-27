@@ -9,3 +9,6 @@ __pycache__/
 
 # Paper repo (Overleaf remote); reference only, never commit pilot code there
 failure-mode-paper/
+
+# CyberGym-E2E task data (Hugging Face)
+data/
