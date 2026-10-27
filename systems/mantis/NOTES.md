@@ -63,6 +63,11 @@ Pinned at `f3162c0`. The fixed graph (`workflow.base.json`, committed here) is
   from `node_info.path`, gate routes from `actions.route`, hand-offs from
   `actions.end_of_agent`, sandbox runs from `run_sandbox*` function calls.
 
+- Data run `20261027T134217` is **superseded**: the adapter then capped output
+  at 32000 tokens, below Mantis's own 128000 for Claude, and the researcher's
+  one turn hit it (`finish_reason: length`), so no finding reached the gate
+  (30 calls, $0.53, isolation valid). Not for analysis.
+
 ### Known gaps (threats to validity)
 
 - **No CyberGym PoC from Mantis.** Its reproducer writes driver scripts that

@@ -40,7 +40,10 @@ NODE_ALIAS = "openai/pilot-mantis."  # per-node model alias prefix (role label, 
 # Long enough for the reproducer to compile and run the OSS-Fuzz target inside
 # the gVisor sandbox (Mantis's default is 30s, far too short for a real build).
 SANDBOX_TIMEOUT_S = 1800
-MAX_OUTPUT_TOKENS = 32000
+# Mantis's own ceiling for a Claude model it does not know
+# (core/config.CLAUDE_DEFAULT_MAX_OUTPUT_TOKENS); Haiku 5.5 accepts it through the
+# proxy. 32000 cut the researcher's turn in data run 20261027T134217 (superseded).
+MAX_OUTPUT_TOKENS = 128000
 
 
 # --- per-node routing to the proxy (D2, box 1) --------------------------------
@@ -269,8 +272,8 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
     env = {"OPENAI_API_KEY": key, "MANTIS_SESSIONS_DB": "/output/sessions.sqlite",
            "DOCKER_HOST": "unix:///var/run/docker.sock",
            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
-           # Mantis sizes max_tokens from its model catalog; the per-node alias
-           # is not in it, so dev run 3 truncated tool calls at 4096 (MAX_TOKENS).
+           # Mantis sizes max_tokens from its model catalog; the per-node alias is
+           # not in it (no "claude" in the name), so output fell to 4096 (dev 3).
            "LLM_MAX_TOKENS": str(MAX_OUTPUT_TOKENS)}
 
     error, exit_code = None, None
