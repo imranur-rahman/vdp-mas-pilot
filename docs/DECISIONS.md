@@ -9,7 +9,7 @@ the date, and the reason in place; do not delete the question.
 | D2 | Role labeling: model alias per (system, role), system-prompt fingerprint, or both | open | |
 | D3 | Trace store | **settled** | Arize Phoenix, as `method.tex` (Instrumentation) states. Review and judge input format: round 3 (Q11) |
 | D4 | Schema of one step record, and the source (proxy, native trace, artifact) of each field — fields from `sections/method.tex` "Instrumentation and Trace Collection" | open | |
-| D5 | Artifact snapshots: end of run only, or at each stage boundary | open | |
+| D5 | When to snapshot artifacts | **settled** | At every hand-off and at the end of the run; differences between captures for files, a copy of the database file for databases (round 3) |
 | D6 | Pilot model (Claude, since the harness is Claude-only) and dollar budget per run | partly settled | Model: Claude Sonnet 5.5 everywhere (P4). Budget: open |
 | D7 | Scoring systems with partial output (VVAH: patch only; deepsec: neither; AutoCVE: PoC only) — e.g. reported location vs `patch.diff` | open | |
 | D8 | Can deepsec and AutoCVE produce any result on C/C++ tasks? If not, does the paper keep them? | open | |
@@ -50,6 +50,36 @@ the date, and the reason in place; do not delete the question.
   image builds may reach package registries (Docker Hub, apt, PyPI) during
   `docker build` only. These are allowlisted in Squid and logged; the running
   test container stays internal.
+
+## Trajectory and capture design (grilling round 3, 2026-10-26)
+
+Driven by `failure-mode-paper/sections/method.tex`: open coding with κ ≥ 0.80,
+an LLM judge, first-decisive-error localization, oracle-confirmed labels,
+optional replay and fault injection, and an open dataset.
+
+- **T-1 Trajectory bundle.** The exporter writes one folder per run:
+  `steps.jsonl` (one step record per line, in the paper's fields), the state
+  captured at each hand-off, oracle results (CyberGym's four validation
+  stages, plus any PoC runs the system made itself), and a readable
+  `trajectory.md`. Human coders, the LLM judge, and the dataset release all
+  read the bundle; Phoenix is for exploring runs. Coder labels go in
+  versioned files, one per coder per run, keyed by step ID.
+- **T-2 Step types.** `llm_step` = one model call plus the tool calls it
+  issued and their results (one per proxy record). Also `code_decision`
+  (gate, deduplication, ordering), `handoff`, and `oracle_run` (sandbox or
+  PoC execution). A first decisive error can be any type.
+- **T-3 Claims extracted after the run.** An LLM pass in the exporter
+  extracts each step's main claim and records the model and prompt it used.
+  Coders can correct it. Systems are not changed (P3).
+- **D5 State capture.** At every hand-off and at the end of the run. File
+  state is stored as differences between captures; database state (Mantis
+  SQLite, VVAH store) as a copy of the database file.
+- **T-4 Replay later.** The pilot stores enough state for counterfactual replay
+  and fault injection, but builds neither.
+- **T-5 Role to stage (part of D2).** Run time records only system and role. A
+  versioned `role-stage-map` file assigns stages afterward (two authors,
+  per the paper). For an agent with two stages, the coder chooses each
+  step's stage.
 
 ## Facts for D1 (2026-10-26)
 
