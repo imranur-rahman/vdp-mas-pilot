@@ -5,6 +5,8 @@ Checked 2026-10-26 on this machine (`/home/irahman3`):
 | Requirement | State |
 |---|---|
 | Linux x86_64 | yes (Linux 7.0, x86_64) |
+| Default task image | base-builder: Ubuntu 24.04.3, glibc 2.39, Python 3.11 (pulled, 3.1 GB) |
+| `/dev/kvm` | present, group `kvm` (user not a member) |
 | Docker daemon | Docker CE 29.9.2 installed 2026-10-26 (official repo); user in `docker` group (new login needed) |
 | `vm.mmap_rnd_bits=28` | not set (needs `sudo sysctl -w vm.mmap_rnd_bits=28`) |
 | Disk | ~69 GB free on `/`; OSS-Fuzz images are large, watch this |
