@@ -62,6 +62,18 @@ _Avoid_: validator, judge
 
 ## Analysis
 
+**Finding**:
+One result a system reports as a vulnerability (a location, and possibly a PoC or patch). A finding is the unit that gets a verdict.
+_Avoid_: alert, issue, report (for a single finding)
+
+**Verdict**:
+The judgement on one finding: `tp_target` (the task's known bug), `tp_other` (a different real bug), `fp` (not a bug), or `unverified`.
+_Avoid_: score, label (labels are failure-mode codes on steps)
+
+**Run outcome**:
+How a run ended, for reasons outside the system's design: `completed`, `refused` (model refusal), `budget_exhausted`, or `out_of_scope` (the system does not support the task's language). Only `completed` runs are coded for failure modes, though every run is reported.
+_Avoid_: status, result
+
 **Symptom**:
 What is observable at the end of a run: false positive, false negative, invalid PoC, non-reaching PoC, plausible but wrong patch, crash or timeout.
 _Avoid_: failure, error

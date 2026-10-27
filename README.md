@@ -2,11 +2,13 @@
 
 Pilot for the paper on failure modes of multi-agent systems (MAS) in
 vulnerability discovery and patching (VDP). It runs six pipeline MAS on one
-CyberGym-E2E task (`curl/arvo_66012`), routes every model call through one
-LiteLLM proxy (backed by OpenRouter), and records the trace data the paper's failure analysis needs.
+CyberGym-E2E task (`md4c/arvo_31332`), routes every model call through one
+LiteLLM proxy (backed by OpenRouter), and records the trace data the paper's
+failure analysis needs.
 
-Status: **planning**. No code until the open decisions in
-[docs/DECISIONS.md](docs/DECISIONS.md) are settled. The full context is in
+Status: **planning**. Decisions are settled in
+[docs/DECISIONS.md](docs/DECISIONS.md) (D8 is decided by the pilot itself);
+next come the spec and tickets. The original context is in
 [docs/HANDOFF.md](docs/HANDOFF.md).
 
 The paper repository is an Overleaf git remote; keep all pilot code here.
