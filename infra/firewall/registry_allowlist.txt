@@ -1,0 +1,18 @@
+# P7 exception: package registries reachable from `docker build` RUN steps on
+# the internal `pilot-build` network (pilot.isolation.build_image), and only
+# there. Every request is logged to the run folder (registry_access.log).
+# Squid dstdomain format: a leading dot matches the domain and its subdomains.
+# Docker Hub
+.docker.io
+.docker.com
+# apt (Debian, Ubuntu)
+deb.debian.org
+security.debian.org
+archive.ubuntu.com
+security.ubuntu.com
+ports.ubuntu.com
+# PyPI
+pypi.org
+files.pythonhosted.org
+# npm (runner images for Node-based systems, e.g. Claude Code)
+registry.npmjs.org
