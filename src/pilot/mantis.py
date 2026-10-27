@@ -244,7 +244,8 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
     cmd = ["python3", "main.py", f"/src/{repo}", "--workflow", "/work/workflow.json",
            "--db", "/output/knowledge.sqlite", "--max-time", f"{max(timeout_s // 60 - 5, 5)}m"]
     env = {"OPENAI_API_KEY": key, "MANTIS_SESSIONS_DB": "/output/sessions.sqlite",
-           "DOCKER_HOST": "unix:///var/run/docker.sock"}
+           "DOCKER_HOST": "unix:///var/run/docker.sock",
+           "LITELLM_LOCAL_MODEL_COST_MAP": "True"}
 
     error, exit_code = None, None
     with isolation.ContainerEventLog(run_dir) as events:

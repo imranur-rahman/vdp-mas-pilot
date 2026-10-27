@@ -5,11 +5,16 @@
 # logged). The container needs the host Docker socket at run time so Mantis's
 # gVisor tier can start sibling `--runtime=runsc --network=none` sandboxes on
 # the task image.
+FROM docker:29-cli AS dockercli
+
 FROM python:3.12-slim
 
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-      git ca-certificates curl docker.io >/dev/null \
+      git ca-certificates curl >/dev/null \
  && rm -rf /var/lib/apt/lists/*
+# Debian's docker.io client speaks API 1.41, below Docker 29's minimum; Mantis's
+# gVisor check (`docker info` -> runsc) needs a current client.
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 
 COPY reference /opt/mantis/reference
 COPY skills /opt/mantis/skills
