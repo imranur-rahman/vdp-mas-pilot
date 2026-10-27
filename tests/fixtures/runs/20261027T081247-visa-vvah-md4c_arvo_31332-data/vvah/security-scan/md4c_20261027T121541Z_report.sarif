@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Agentic SAST",
+          "version": "1.5.1",
+          "rules": [],
+          "supportedTaxonomies": [
+            {
+              "guid": "ec480a2c-8267-5d90-affc-401687cd64b0"
+            }
+          ]
+        }
+      },
+      "taxonomies": [
+        {
+          "guid": "ec480a2c-8267-5d90-affc-401687cd64b0",
+          "name": "CWE",
+          "organization": "MITRE",
+          "shortDescription": {
+            "text": "The MITRE Common Weakness Enumeration"
+          },
+          "informationUri": "https://cwe.mitre.org/",
+          "taxa": []
+        }
+      ],
+      "properties": {
+        "applicationId": "",
+        "enrichmentUnavailable": false,
+        "deepdiveSkipped": false,
+        "hollow": false,
+        "coverageDegraded": false,
+        "coverageDegradedReasons": [],
+        "threatsTotal": 7,
+        "threatsWithoutUnit": [],
+        "threatsBeforeCap": 7,
+        "threatsTruncated": 0,
+        "threatsPromoted": 0
+      },
+      "results": [],
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ]
+    }
+  ]
+}

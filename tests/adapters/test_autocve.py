@@ -193,3 +193,29 @@ def test_a_completed_run_with_nothing_on_c_is_out_of_scope_with_evidence(tmp_pat
     assert autocve.scope_outcome(completed, [{"finding_id": "autocve-1"}], tmp_path)[0]["outcome"] == "completed"
     capped = {"outcome": "budget_exhausted", "model_calls": 40}
     assert autocve.scope_outcome(capped, [], tmp_path)[0]["outcome"] == "budget_exhausted"
+
+
+def test_handoffs_and_code_decisions_reach_the_bundle(tmp_path):
+    from pilot.exporter import export
+    run = tmp_path / "20261027T120000-autocve-md4c_arvo_31332-dev"
+    run.mkdir()
+    (run / "run.json").write_text(json.dumps({"run_id": run.name, "system": "autocve", "task": "md4c/arvo_31332",
+                                              "kind": "dev", "outcome": {"outcome": "completed"}}))
+    db = tmp_path / "autocve.db"
+    con = _db(db)
+    rec = autocve_start.HandoffRecorder(run / "captures", db, tmp_path / "ws")
+    rec.capture("to-finding", from_role="orchestrator", to_role="finding")
+    con.execute("insert into agent_findings values ('f1', 'OOB read', 'src/md4c.c')")
+    con.commit()
+    rec.capture("from-finding", from_role="finding", to_role="orchestrator", note="findings=1")
+    autocve_start.DecisionLog(run / "decisions.jsonl").write("select_findings_for_verification",
+                                                             {"candidates_in": 1, "selected": []})
+    autocve.build_state(run)
+
+    steps = [json.loads(l) for l in (export(run) / "steps.jsonl").read_text().splitlines()]
+    handoffs = [s for s in steps if s["step_type"] == "handoff"]
+    assert [(s["role"], s["state_ref"]["to_role"]) for s in handoffs] == [
+        ("orchestrator", "finding"), ("finding", "orchestrator")]
+    assert handoffs[1]["state_ref"]["db"] == "captures/02-from-finding.sqlite"
+    [decision] = [s for s in steps if s["step_type"] == "code_decision"]
+    assert decision["state_ref"]["decision"] == "select_findings_for_verification"

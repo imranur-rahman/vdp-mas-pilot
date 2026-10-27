@@ -81,7 +81,22 @@ def build_state(run_dir: Path) -> list[dict]:
     for e in manifest:
         e["db"] = db_of.get(e["seq"])
     (run_dir / "state" / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    write_handoffs(run_dir, manifest)
     return manifest
+
+
+def write_handoffs(run_dir: Path, manifest: list[dict]) -> None:
+    """`handoffs.jsonl` (the collector format the exporter reads) from the state
+    manifest and the start script's `decisions.jsonl`."""
+    from ..deepsec import handoff_records
+    path = Path(run_dir) / "decisions.jsonl"
+    decisions = [json.loads(l) for l in path.read_text().splitlines() if l.strip()] if path.exists() else []
+    records = handoff_records(manifest, decisions)
+    db_of = {e["seq"]: e.get("db") for e in manifest}
+    for r in records:
+        if r["step_type"] == "handoff":
+            r["state_ref"]["db"] = db_of.get(r["state_ref"]["seq"])
+    (Path(run_dir) / "handoffs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
 
 
 # --- output adapter ------------------------------------------------------------------
