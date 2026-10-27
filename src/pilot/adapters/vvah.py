@@ -312,7 +312,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     (run_dir / "findings.json").write_text(json.dumps({"findings": findings}, indent=2))
 
     meta.update(finished_at=time.time(), error=error, key_spend=infra.key_spend(key),
-                outcome=runner._outcome(run_dir, [key], budget, error), isolation=events.verdict())
+                outcome=runner._outcome(run_dir, [key], budget, error, meta.get("system_exit_code")), isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
 

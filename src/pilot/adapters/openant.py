@@ -335,7 +335,7 @@ def finish(run_dir: Path) -> Path:
     spends = meta.get("key_spend") or {}
     meta.update(finished_at=meta.get("finished_at") or time.time(), error=error, findings=len(findings),
                 total_spend_usd=round(sum((s.get("spend") or 0) for s in spends.values()), 4) if spends else None,
-                outcome=runner._outcome(run_dir, list(spends), meta["budget_usd"], error),
+                outcome=runner._outcome(run_dir, list(spends), meta["budget_usd"], error, meta.get("runner_exit_code")),
                 isolation=isolation.isolation_verdict(isolation.read_events(run_dir)))
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir

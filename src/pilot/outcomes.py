@@ -1,8 +1,11 @@
 """Run outcomes, read from a run folder's raw proxy log (M-2, D6).
 
-`completed`, `refused` (the run's last model call was refused), or
-`budget_exhausted` (the proxy rejected a call because the run's key hit its
-cap). `out_of_scope` is decided by an adapter, not from the log.
+`budget_exhausted` (the proxy rejected a call because the run's cap was
+hit), `refused` (the run's last model call was refused), `adapter_error` (our
+adapter raised, or the system never made a model call), else `completed`, in
+that order of precedence. A system that ran and failed on its own (nonzero
+exit) completed; so did one stopped by its time limit. `out_of_scope` is
+decided by an adapter, not from the log.
 """
 
 import json
@@ -65,7 +68,20 @@ def refusals(records: list[dict]) -> dict[str, dict]:
     return out
 
 
-def run_outcome(run_dir: Path) -> dict:
+def _is_timeout(error: str) -> bool:
+    """The run's time limit stopped the system: a run limit, like the budget, not an adapter fault."""
+    return "timeout" in error.lower() or "timed out" in error.lower()
+
+
+def _response_cost(call: dict):
+    """OpenRouter's actual cost of a non-streamed call, from the response's usage."""
+    resp = call.get("response")
+    usage = resp.get("usage") if isinstance(resp, dict) else None
+    return usage.get("cost") if isinstance(usage, dict) else None
+
+
+def run_outcome(run_dir: Path, *, error: str | None = None, exit_code: int | None = None) -> dict:
+    """`error` is the adapter's exception, if any; `exit_code` the system's, if it has one."""
     records = read_proxy_log(run_dir)
     calls = sorted((r for r in records if r.get("record") == "call"), key=lambda r: str(r.get("start_time")))
     stops = stream_stops(records)
@@ -75,14 +91,18 @@ def run_outcome(run_dir: Path) -> dict:
         outcome = "budget_exhausted"
     elif calls and calls[-1].get("litellm_call_id") in refused:
         outcome = "refused"
+    elif (error and not _is_timeout(error)) or not calls:
+        outcome = "adapter_error"
     else:
         outcome = "completed"
+    streamed = {s["litellm_call_id"] for s in stops}
+    costs = [s["cost"] for s in stops] + [_response_cost(c) for c in calls if c.get("litellm_call_id") not in streamed]
     return {
-        "outcome": outcome, "model_calls": len(calls),
+        "outcome": outcome, "model_calls": len(calls), "system_exit_code": exit_code,
         "refusals": [{"category": d.get("category"), "explanation": d.get("explanation")}
                      for d in refused.values()],
         "budget_rejections": len(budget_hits),
-        "cost_usd_openrouter": round(sum(s["cost"] or 0 for s in stops), 4),
+        "cost_usd_openrouter": round(sum(c or 0 for c in costs), 4),
         "cost_usd_estimate": round(sum((r.get("standard_logging_object") or {}).get("response_cost") or 0
                                        for r in calls), 4),
     }

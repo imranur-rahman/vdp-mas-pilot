@@ -309,11 +309,17 @@ the team's own Anthropic key (BYOK) or calls go to Anthropic directly.
 - **Run outcome** (`pilot.outcomes.run_outcome`, in `run.json` under
   `outcome`): `budget_exhausted` if any `budget_exceeded` record exists;
   else `refused` if the run's last model call was refused; else
-  `completed`. `out_of_scope` is set by adapters. Refusals that the system
-  got past are listed but do not change the outcome.
+  `adapter_error` if the adapter raised (anything but the run's time limit)
+  or the run made no model call; else `completed`. A system that ran and
+  exited nonzero on its own completed; its exit code is kept as
+  `system_exit_code`. `out_of_scope` is set by adapters. Refusals that the
+  system got past are listed but do not change the outcome.
+  `cost_usd_openrouter` sums OpenRouter's `usage.cost` from streamed events
+  and, for non-streamed calls, from the logged response.
 - **Fifth outcome `adapter_error` (2026-10-27, user decision):** the run was
   stopped by our adapter (setup, install, or harness code), not by the system
-  or the model. Set by adapters (deepsec's first). Such a run is re-run, not
+  or the model. Set by `run_outcome` from the adapter's error and from
+  zero-call runs, and by adapters (deepsec's). Such a run is re-run, not
   coded. A run that ran but found nothing is `completed`, never `out_of_scope`
   (AutoCVE data run, relabelled with the old value in `outcome.outcome_note`).
 - **Caps are checked before each call** (LiteLLM key `max_budget`, priced

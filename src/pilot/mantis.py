@@ -302,7 +302,7 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
     outcome = collect_outputs(run_dir, work, task, repo, image_ref)
     meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code,
                 key_spend=infra.key_spend(key),
-                outcome={**outcomes.run_outcome(run_dir), "harness_error": error, **outcome},
+                outcome={**outcomes.run_outcome(run_dir, error=error, exit_code=exit_code), "harness_error": error, **outcome},
                 isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir

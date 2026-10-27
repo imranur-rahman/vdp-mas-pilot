@@ -100,7 +100,7 @@ def run_claude_code(task: str, kind: str, budget_usd: float | None, timeout_s: i
         run_agent._execute_claude_code = execute
         events.stop()
 
-    meta.update(finished_at=time.time(), error=error, outcome=_outcome(run_dir, minted, budget, error),
+    meta.update(finished_at=time.time(), error=error, outcome=_outcome(run_dir, minted, budget, error, meta.get("cybergym_exit_code")),
                 isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
@@ -186,7 +186,7 @@ def run_claude_code_in_runner(task: str, kind: str, budget_usd: float | None, ti
             shutil.copy(workspace / "output" / name, run_dir / name)
 
     meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code,
-                key_spend=infra.key_spend(key), outcome=_outcome(run_dir, [key], budget, error),
+                key_spend=infra.key_spend(key), outcome=_outcome(run_dir, [key], budget, error, exit_code),
                 isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
@@ -196,6 +196,8 @@ def _image_exists(tag: str) -> bool:
     return subprocess.run(["docker", "image", "inspect", tag], capture_output=True).returncode == 0
 
 
-def _outcome(run_dir: Path, minted: list[str], budget: float, error: str | None) -> dict:
-    """Run outcome from the proxy log: refusals and budget exhaustion are not system failures."""
-    return {**outcomes.run_outcome(run_dir), "harness_error": error, "keys_minted": len(minted)}
+def _outcome(run_dir: Path, minted: list[str], budget: float, error: str | None,
+             exit_code: int | None = None) -> dict:
+    """Run outcome from the proxy log and the adapter's error (outcomes.run_outcome)."""
+    return {**outcomes.run_outcome(run_dir, error=error, exit_code=exit_code),
+            "harness_error": error, "keys_minted": len(minted)}

@@ -400,7 +400,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
 
     result_path = work / "result.json"
     meta["autocve_result"] = json.loads(result_path.read_text()) if result_path.exists() else None
-    outcome = runner._outcome(run_dir, list(keys.values()), budget, error)
+    outcome = runner._outcome(run_dir, list(keys.values()), budget, error, exit_code)
     spend = {role: infra.key_spend(k) for role, k in keys.items()}
     meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code, key_spend=spend,
                 spend_usd=round(sum((s.get("spend") or 0) for s in spend.values()), 4),

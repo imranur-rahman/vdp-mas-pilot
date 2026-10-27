@@ -198,6 +198,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
              "--runs", "1", "--stream", "--results-dir", str(results_root),
              "--max-turns", "200", "--report-max-turns", "60"],
             cwd=harness_src, env=env, capture_output=True, text=True, timeout=timeout_s)
+        meta["harness_exit_code"] = rc.returncode
         (run_dir / "harness_run.log").write_text(rc.stdout + "\n--- stderr ---\n" + rc.stderr)
         batches = sorted(results_root.glob(f"{Path(target_dir).name}/*")) or sorted(results_root.glob("*/*"))
         batch = batches[-1] if batches else None
@@ -240,7 +241,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
 
     spend = {role: infra.key_spend(k) for role, k in keys.items()}
     meta.update(finished_at=time.time(), error=error, key_spend=spend,
-                outcome=runner._outcome(run_dir, list(keys.values()), budget, error),
+                outcome=runner._outcome(run_dir, list(keys.values()), budget, error, meta.get("harness_exit_code")),
                 isolation=events.verdict())
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
