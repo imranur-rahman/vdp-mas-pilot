@@ -1,19 +1,19 @@
 # LiteLLM proxy for the pilot. Every call goes to OpenRouter's Anthropic-format
-# endpoint (ADR 0003). Systems never see these names: pilot_hooks.py routes by
+# endpoint (ADR 0003); every route is Claude Haiku 5.5 (ADR 0005). Systems never see these names: pilot_hooks.py routes by
 # the virtual key's run kind and leaves the requested model name in the log.
 model_list:
   - model_name: pilot-data
     litellm_params:
-      model: anthropic/anthropic/claude-sonnet-5.5
+      model: anthropic/anthropic/claude-haiku-5.5
       api_base: os.environ/PILOT_UPSTREAM_BASE
       api_key: os.environ/OPENROUTER_API_KEY
     model_info:
-      # OpenRouter list prices (2026-10-26); LiteLLM has none for these names,
-      # and budget caps depend on them.
-      input_cost_per_token: 0.000002
-      output_cost_per_token: 0.00001
-      cache_read_input_token_cost: 0.0000001
-      cache_creation_input_token_cost: 0.0000025
+      # Study model is Haiku 5.5 (ADR 0005). OpenRouter's >100k-prompt tier
+      # for every call: overestimating spend only makes caps fire sooner.
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000025
+      cache_read_input_token_cost: 0.00000005
+      cache_creation_input_token_cost: 0.000000625
   - model_name: pilot-dev
     litellm_params:
       model: anthropic/anthropic/claude-haiku-5.5

@@ -15,12 +15,12 @@ def messages(proxy, key, **body):
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
 
 
-def test_data_run_routes_to_sonnet_on_anthropic_via_openrouter(proxy, upstream, make_key):
+def test_data_run_routes_to_haiku_on_anthropic_via_openrouter(proxy, upstream, make_key):
     key = make_key(pilot_run_id="t-data", pilot_run_kind="data", pilot_system="claude-code")
     r = messages(proxy, key)
     assert r.status_code == 200, r.text
     sent = upstream.last()
-    assert sent["model"] == "anthropic/claude-sonnet-5.5"
+    assert sent["model"] == "anthropic/claude-haiku-5.5"
     assert sent["provider"] == {"order": ["anthropic"], "allow_fallbacks": False}
 
 
@@ -96,8 +96,8 @@ def test_calls_are_priced_so_budget_caps_can_fire(proxy, upstream, make_key):
     key = make_key(pilot_run_id="t-cost", pilot_run_kind="data")
     messages(proxy, key)
     rec = wait_for_log(proxy["runs"] / "t-cost" / "proxy.jsonl")[-1]
-    # 10 input + 5 output tokens at Sonnet 5.5 list prices
-    assert rec["standard_logging_object"]["response_cost"] == pytest.approx(10 * 2e-6 + 5 * 1e-5)
+    # 10 input + 5 output tokens at Haiku 5.5's >100k-tier prices (conservative)
+    assert rec["standard_logging_object"]["response_cost"] == pytest.approx(10 * 5e-7 + 5 * 2.5e-6)
 
 
 def test_streamed_thinking_is_kept_raw_and_linked_to_its_call(proxy, upstream, make_key):

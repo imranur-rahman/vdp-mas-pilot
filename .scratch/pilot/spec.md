@@ -18,12 +18,12 @@ Vocabulary follows `GLOSSARY.md`; decisions follow `docs/DECISIONS.md` and `docs
 2. As a researcher, I want the proxy to log the full request and response of every call to a raw file per run, so that the analysis does not depend on any trace tool's database.
 3. As a researcher, I want the proxy to also send calls to Phoenix, so that I can explore runs interactively while debugging.
 4. As a researcher, I want all calls sent to OpenRouter with the upstream provider fixed to Anthropic and fallbacks off, so that thinking blocks and refusal behavior stay consistent within a run.
-5. As a researcher, I want every system's every role to use Claude Sonnet 5.5 in data runs, so that the model is not a confound between systems.
-6. As a developer building an adapter, I want development runs to use Claude Haiku 5.5, so that debugging does not consume the data budget.
+5. As a researcher, I want every system's every role to use Claude Haiku 5.5 (ADR 0005), so that the model is not a confound between systems.
+6. As a developer building an adapter, I want development runs capped at a small budget, so that debugging does not consume the data budget.
 7. As a researcher, I want each run tagged as a development run or a data run, so that development runs never enter the analysis.
 8. As a researcher, I want the proxy to ask for summarized thinking on every request that has thinking on, so that coders can see each agent's stated intent.
 9. As a researcher, I want thinking summaries stored apart from agent output and marked as model-written summaries, so that nobody mistakes them for the actual reasoning.
-10. As a researcher, I want the proxy to remove only the sampling settings Sonnet 5.5 rejects and log each removal, so that systems run without code changes and we know exactly what each one sent.
+10. As a researcher, I want the proxy to remove only the sampling settings the study model rejects and log each removal, so that systems run without code changes and we know exactly what each one sent.
 11. As a researcher, I want each request labeled with its system, run, and role without changing the model name the system sees, so that labeling cannot change system behavior.
 12. As a researcher, I want a hash of each request's system prompt recorded, so that roles can be identified even for systems with no per-role settings, and so that per-role labels can be cross-checked.
 13. As a researcher, I want a hard dollar cap per run enforced at the proxy, so that one runaway system cannot spend the pilot budget.
@@ -68,7 +68,7 @@ Vocabulary follows `GLOSSARY.md`; decisions follow `docs/DECISIONS.md` and `docs
 ## Implementation Decisions
 
 - **Language and tooling:** Python, managed with uv, for the runner, proxy hooks, collectors, exporter, and scoring. This matches LiteLLM and CyberGym-E2E's own scripts.
-- **Proxy module:** a LiteLLM proxy configuration plus custom hooks. The configuration maps the model names systems send to OpenRouter's Sonnet 5.5 (data runs) or Haiku 5.5 (development runs), with OpenRouter provider routing fixed to Anthropic and fallbacks off, and `drop_params` for the rejected sampling settings. The pre-call hook adds summarized-thinking display where thinking is adaptive and skips `between_tools`. It records removed settings and computes the system-prompt hash. The logging hook appends one raw record per call to the run's log, with run ID, role label, prompt hash, removed settings, usage, cost, and refusal category. It also forwards to Phoenix. Budgets are per-run proxy keys with a hard dollar cap.
+- **Proxy module:** a LiteLLM proxy configuration plus custom hooks. The configuration maps the model names systems send to OpenRouter's Claude Haiku 5.5 for both data and development runs (ADR 0005), with OpenRouter provider routing fixed to Anthropic and fallbacks off, and `drop_params` for the rejected sampling settings. The pre-call hook adds summarized-thinking display where thinking is adaptive and skips `between_tools`. It records removed settings and computes the system-prompt hash. The logging hook appends one raw record per call to the run's log, with run ID, role label, prompt hash, removed settings, usage, cost, and refusal category. It also forwards to Phoenix. Budgets are per-run proxy keys with a hard dollar cap.
 - **Role labeling:** never through the model name (ADR 0002). Each adapter declares how its roles are told apart: a per-role proxy key or URL where the system has per-role settings, otherwise the prompt hash alone.
 - **Runner module:** one command takes system, task, and run kind (development or data). It creates the run folder and run ID, prepares the task through CyberGym-E2E's own container setup, issues the run's proxy key, starts the adapter, logs container events for the run, and enforces the wall-clock limit. It then calls the output adapter and CyberGym validation, and writes the run outcome (`completed`, `refused`, `budget_exhausted`, `out_of_scope`) and an isolation verdict.
 - **Placement and isolation:** VVAH and deepsec run in the task container (deepsec with Node 22 pre-installed). The Anthropic harness, AutoCVE, OpenAnt, and Mantis run in runner containers on `cybergym-internal`. Containers they start get no network or an internal network through each system's own settings. OpenAnt's image builds may reach Docker Hub, apt, and PyPI through a logged allowlist. Mantis uses its gVisor tier with the task image. The harness builds its target image `FROM` the task image and limits its own egress proxy to LiteLLM.
@@ -79,14 +79,14 @@ Vocabulary follows `GLOSSARY.md`; decisions follow `docs/DECISIONS.md` and `docs
 - **Exporter module:** reads only the run folder. It builds steps from the raw proxy log, adds native-trace structure, code decisions, hand-offs and oracle runs from collector output, and joins stages from the role-to-stage map. It renders the trajectory and runs claim extraction (Haiku 5.5 through the proxy, model and prompt recorded).
 - **Scoring:** the `tp_target` check per output type is given in `docs/DECISIONS.md` (F-1). All other verdicts are left to coders (ADR 0004).
 - **Coding kit:** per-coder label files keyed by step ID and finding ID, and a κ computation over two coders' files.
-- **Budget:** $200 total: $10 for ticket 01, $20 cap per data run (six runs), $70 reserve. Development runs use Haiku 5.5 and count against the reserve.
+- **Budget:** $200 total: $10 for ticket 01, $20 cap per data run (six runs), $70 reserve. Development runs count against the reserve.
 
 ## Testing Decisions
 
 - A good test checks external behavior at a seam, never internals: what goes upstream and what gets logged for a given request; what bundle comes out of a given run folder.
 - **Seam 1, the proxy:** requests go into the real LiteLLM proxy configuration with a fake upstream in place of OpenRouter. Tests cover routing and provider fixing, summarized-thinking injection (and its skip for `between_tools`), removal and logging of rejected settings, role labels and prompt hashes, refusal records, and budget cap behavior. No model spend.
 - **Seam 2, the run folder:** recorded run folders go into the exporter, and tests check the bundle: step records and their fields, input deltas, hand-off and oracle steps, stage joins, rendering, verdict checks, and κ. The first fixture comes from ticket 01's real run; each adapter ticket adds a fixture from its own run. Claim extraction is tested with a recorded extraction response, not a live call.
-- **Adapters** are accepted by a real run, not by automated tests: a development run on Haiku 5.5, then one data run on Sonnet 5.5 that produces a complete bundle.
+- **Adapters** are accepted by a real run, not by automated tests: a development run, then one data run, both on Claude Haiku 5.5 that produces a complete bundle.
 - **Prior art:** none in this repo yet. The fixtures from ticket 01 set the pattern.
 
 ## Out of Scope

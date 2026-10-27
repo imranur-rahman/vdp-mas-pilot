@@ -11,4 +11,4 @@
 - [ ] Knowledge-store copies at each hand-off and at the end; gate decisions recorded as `code_decision` steps
 - [ ] Google ADK spans collected as native traces and joined in the bundle
 - [ ] PoC and patch validated with CyberGym's four stages; findings normalized
-- [ ] Changes kept as patch files; Haiku development run, then one Sonnet data run, each producing a complete bundle
+- [ ] Changes kept as patch files; a development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle

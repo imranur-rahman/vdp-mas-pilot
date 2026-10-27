@@ -11,4 +11,4 @@
 - [ ] State captured at each stage hand-off and at the end of the run
 - [ ] Findings normalized; the patch is validated with CyberGym stages 3–4 for the `tp_target` check
 - [ ] Any change to VVAH is a patch file kept with the adapter
-- [ ] A Haiku development run, then one Sonnet data run, each producing a complete bundle; the data-run folder is added as an exporter fixture
+- [ ] A development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle; the data-run folder is added as an exporter fixture

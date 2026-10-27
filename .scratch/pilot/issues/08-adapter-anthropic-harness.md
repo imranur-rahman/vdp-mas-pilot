@@ -11,4 +11,4 @@
 - [ ] Finder and grader distinguished in the trace (prompt hash or per-invocation key)
 - [ ] Hand-off files captured; grader re-runs appear as `oracle_run` steps
 - [ ] PoC and patch validated with CyberGym's four stages; findings normalized
-- [ ] Changes kept as patch files; Haiku development run, then one Sonnet data run, each producing a complete bundle
+- [ ] Changes kept as patch files; a development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle

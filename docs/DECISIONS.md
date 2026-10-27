@@ -10,7 +10,7 @@ the date, and the reason in place; do not delete the question.
 | D3 | Trace store | **settled** | Arize Phoenix, as `method.tex` (Instrumentation) states. Review and judge input format: round 3 (Q11) |
 | D4 | Step record schema | **settled** | See "Step record" below |
 | D5 | When to snapshot artifacts | **settled** | At every hand-off and at the end of the run; differences between captures for files, a copy of the database file for databases (round 3) |
-| D6 | Model and budget | **settled** | Claude Sonnet 5.5 everywhere (P4). Total pilot budget $200: T1 smoke test $10; one run per system at a hard cap of $20 ($120); $70 reserve for re-runs; no repeated runs in the pilot. A capped run ends `budget_exhausted`. Claim extraction (our tooling) uses Claude Haiku 5.5 |
+| D6 | Model and budget | **settled** | Claude Haiku 5.5 everywhere (P4, ADR 0005; was Sonnet 5.5 until 2026-10-27). Total pilot budget $200: T1 smoke test $10; one run per system at a hard cap of $20 ($120); $70 reserve for re-runs; no repeated runs in the pilot. A capped run ends `budget_exhausted`. Claim extraction (our tooling) uses Claude Haiku 5.5 |
 | D7 | Scoring and false positives | **settled** | Superseded by F-1 below: verdicts per finding, plus step coding in every run |
 | D8 | deepsec and AutoCVE on C/C++ | **pilot decides** | Run all six on the pilot task; a system that produces nothing on C gets outcome `out_of_scope`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
 
@@ -31,7 +31,7 @@ the date, and the reason in place; do not delete the question.
   patch file in this repo and listed in the paper. Prompts, agent graphs,
   and gates are never changed.
 - **P4 (D6) One model everywhere.** Every role of every system calls the same
-  real model, **Claude Sonnet 5.5**, in the pilot and the full study. The
+  real model, **Claude Haiku 5.5** (ADR 0005; originally Sonnet 5.5), in the pilot and the full study. The
   per-run dollar budget is still open.
 - **P5 Manual trajectory review (new requirement).** The team will manually
   review agent trajectories next to the matching states captured by the
@@ -224,10 +224,10 @@ step stores only `input_delta`; the full request is kept once, in the raw proxy 
 
 ## Development runs (2026-10-26)
 
-- **B-1** While an adapter is being built, its runs use Claude Haiku 5.5 and are
-  tagged as development runs; they never enter the analysis and count
-  against the $70 reserve. Only each system's single data run uses Sonnet
-  5.5. Spec and tickets: `.scratch/pilot/`.
+- **B-1** While an adapter is being built, its runs are tagged as development runs;
+  they never enter the analysis and count against the $70 reserve. Since
+  ADR 0005, development and data runs use the same model (Haiku 5.5); only
+  the tag and the budget differ. Spec and tickets: `.scratch/pilot/`.
 
 ## R-1 check results (ticket 01, 2026-10-27)
 
@@ -258,7 +258,7 @@ Isolation (P1), checked from inside `cybergym-internal`: LiteLLM reachable
 through the gateway forwarder; `api.anthropic.com` and `openrouter.ai` denied
 by Squid (empty allowlist); Phoenix unreachable.
 
-## Open: Sonnet 5.5 refuses the CyberGym e2e task (2026-10-27)
+## Sonnet 5.5 refuses the CyberGym e2e task (2026-10-27, resolved)
 
 The Sonnet 5.5 data run of CyberGym's `claude-code` agent on
 `md4c/arvo_31332` ended after 6 calls and 1.6 minutes ($0.09): every call
@@ -273,4 +273,4 @@ points to the Cyber Verification Program
 Through OpenRouter, calls run under OpenRouter's Anthropic account, so a
 verification of the team's own organization applies only if OpenRouter uses
 the team's own Anthropic key (BYOK) or calls go to Anthropic directly.
-**P4/D6 (Sonnet 5.5 everywhere) is blocked until the team decides.**
+**Resolved 2026-10-27: the study uses Claude Haiku 5.5 for every system and role (ADR 0005).**

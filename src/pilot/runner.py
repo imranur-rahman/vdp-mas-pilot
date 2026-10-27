@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import infra
 
-MODELS = {"data": "claude-sonnet-5-5", "dev": "claude-haiku-5-5"}
+MODELS = {"data": "claude-haiku-5-5", "dev": "claude-haiku-5-5"}  # ADR 0005
 DEFAULT_BUDGET = {"data": 20.0, "dev": 2.0}
 
 

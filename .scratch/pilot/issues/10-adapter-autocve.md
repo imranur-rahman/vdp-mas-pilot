@@ -10,4 +10,4 @@
 - [ ] Sandbox containers on no network or an internal one; isolation verdict `valid`
 - [ ] Agents labeled per D2; database state captured at hand-offs and at the end
 - [ ] PoC checked with CyberGym stage 1 and stack-trace overlap with the functions in `patch.diff`; findings normalized; or outcome `out_of_scope` with evidence
-- [ ] Changes kept as patch files; Haiku development run, then one Sonnet data run, each producing a complete bundle
+- [ ] Changes kept as patch files; a development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle
