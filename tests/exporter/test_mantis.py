@@ -202,7 +202,7 @@ def test_adk_spans_label_each_model_call_with_its_node_name(tmp_path):
 def _mantis_workflow() -> dict:
     return {
         "name": "mantis_graph",
-        "config": {"sandbox": {"type": "static-only"}},
+        "config": {"default_model": "vertex_ai/gemini-3.8-flash", "sandbox": {"type": "static-only"}},
         "nodes": [
             {"id": "researcher", "type": "agent", "model": "vertex_ai/gemini-3.5-flash-lite"},
             {"id": "patcher", "type": "agent"},
@@ -224,6 +224,10 @@ def test_pilot_workflow_routes_every_agent_node_through_the_proxy(tmp_path):
     # classifier gates are code-side: never given a model.
     gate = next(n for n in wf["nodes"] if n["type"] == "classifier")
     assert "model" not in gate or gate.get("model") is None
+
+    # the graph-wide default (preflight, helpers without a node) also on the proxy
+    assert wf["config"]["default_model"] == "openai/pilot-mantis.default"
+    assert wf["config"]["api_base"] == "http://172.18.0.1:4000"
 
     # gVisor tier on the task image, no network is enforced by the tier itself.
     sb = wf["config"]["sandbox"]

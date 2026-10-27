@@ -64,6 +64,8 @@ def pilot_workflow(workflow: dict, *, gateway: str, port: int, task_image: str,
             node["model"] = f"{NODE_ALIAS}{node['id']}"
             node["api_base"] = base
     config = wf.setdefault("config", {})
+    config["default_model"] = f"{NODE_ALIAS}default"
+    config["api_base"] = base
     config["sandbox"] = {
         "type": "gvisor",
         "options": {"image": task_image, "runtime": "runsc", "container_tool": "docker",
