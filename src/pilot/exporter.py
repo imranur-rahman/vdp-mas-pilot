@@ -80,10 +80,13 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
     iteration = attempts[-1] if attempts else 1
     steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in llm]
     steps += [{**_empty_step(), **base, **s} for s in oracle]
+    steps += [{**_empty_step(), **base, "iteration": iteration, **s}
+              for s in _collector_steps(run_dir, bundle)]
     for seq, s in enumerate(steps, 1):
         s["seq"] = seq
         s["step_id"] = f"s{seq:04d}"
     _link_parents(steps)
+    _join_native_traces(steps, run_dir)
     run = {**run, "stage_map": stages.join_stages(steps, stages.load_map(stage_map))}
     run["claims"] = claims.extract(steps, run_dir, bundle, extractor)
 
@@ -312,7 +315,7 @@ def _link_parents(steps: list[dict]) -> None:
         if agent is not None:
             s["parent_step_id"] = last_of_agent.get(agent)
             last_of_agent[agent] = last_llm = s["step_id"]
-        elif s["step_type"] == "oracle_run":
+        elif s["step_type"] in ("oracle_run", "code_decision", "handoff"):
             s["parent_step_id"] = last_llm
 
 
@@ -362,6 +365,116 @@ def _copy_first(bundle: Path, dest: str, *candidates: Path) -> str | None:
             shutil.copyfile(src, bundle / dest)
             return dest
     return None
+
+
+# --- Layer-2 collector steps (code decisions, hand-offs, sandbox runs) --------
+# An adapter's collector writes what the proxy cannot see to `<run>/collector/`
+# (docs/DECISIONS.md T-2/D5). A run with no `collector/` (CyberGym's own agents)
+# gets no such steps, so their bundles are unchanged. Files are read in `ts`
+# order and appended after the model-call and CyberGym-validation steps.
+
+def _join_native_traces(steps: list[dict], run_dir: Path) -> None:
+    """Set each model call's `role` and `agent_instance_id` from the ADK agent
+    span that produced it (D2, bundle native traces).
+
+    A span is matched to a call by `litellm_call_id`/`call_id` when the trace
+    carries it, else by order among the model-call steps. A run with no
+    `collector/adk_spans.jsonl` is left untouched (the proxy's own role label,
+    or the prompt hash, stands)."""
+    spans = _read_jsonl(Path(run_dir) / "collector" / "adk_spans.jsonl")
+    if not spans:
+        return
+    by_call = {s.get("call_id") or s.get("litellm_call_id"): s for s in spans if
+               s.get("call_id") or s.get("litellm_call_id")}
+    calls = [s for s in steps if s["step_type"] in ("llm_step", "refusal")]
+    for i, step in enumerate(calls):
+        span = by_call.get(step.get("litellm_call_id")) or (spans[i] if i < len(spans) else None)
+        if span is None:
+            continue
+        role = span.get("role") or span.get("name")
+        if not role:
+            continue
+        step["role"] = role
+        step["agent_instance_id"] = f"{role}:{step.get('prompt_id')}"
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+
+def _collector_steps(run_dir: Path, bundle: Path) -> list[dict]:
+    collector = Path(run_dir) / "collector"
+    steps = []
+    steps += [_gate_step(r) for r in _read_jsonl(collector / "gates.jsonl")]
+    steps += [_handoff_step(r, run_dir, bundle) for r in _read_jsonl(collector / "handoffs.jsonl")]
+    steps += [_sandbox_step(r) for r in _read_jsonl(collector / "oracle_runs.jsonl")]
+    steps.sort(key=lambda s: (s["ts_start"] if s["ts_start"] is not None else 0))
+    return steps
+
+
+def _gate_step(r: dict) -> dict:
+    """A code-side classifier gate: which branch it took and why (code_decision)."""
+    decision, reason = r.get("decision"), r.get("reason")
+    ts = _ts(r.get("ts"))
+    output = f"gate `{r.get('gate')}` (visit {r.get('visit')}) routed to: {decision}"
+    if reason:
+        output += f"\nreason: {reason}"
+    return {
+        "step_type": "code_decision",
+        "role": r.get("gate"),
+        "agent_instance_id": f"gate:{r.get('gate')}",
+        "output": output,
+        "state_ref": r.get("input_ref"),
+        "ts_start": ts, "ts_end": ts,
+    }
+
+
+def _handoff_step(r: dict, run_dir: Path, bundle: Path) -> dict:
+    """A knowledge-store hand-off: what one node passed to the next (handoff).
+
+    The captured state (a copy of the SQLite store and the file diff) is copied
+    into the bundle so it stands alone; `state_ref` names the bundle copies."""
+    ts = _ts(r.get("ts"))
+    frm, to = r.get("from_role"), r.get("to_role")
+    state_ref = {"from": frm, "to": to}
+    for key in ("db_snapshot", "file_diff"):
+        src = r.get(key)
+        if src and (Path(run_dir) / src).is_file():
+            dest = f"state/{Path(src).name}"
+            (bundle / "state").mkdir(exist_ok=True)
+            shutil.copyfile(Path(run_dir) / src, bundle / dest)
+            state_ref[key] = dest
+    return {
+        "step_type": "handoff",
+        "role": to,
+        "agent_instance_id": f"handoff:{frm}->{to}",
+        "output": r.get("note") or f"{frm} handed the knowledge store to {to}",
+        "state_ref": state_ref,
+        "ts_start": ts, "ts_end": ts,
+    }
+
+
+def _sandbox_step(r: dict) -> dict:
+    """A PoC/command the reproducer ran in the gVisor sandbox (oracle_run)."""
+    ts_start, ts_end = _ts(r.get("ts_start")), _ts(r.get("ts_end"))
+    crashed = r.get("crashed")
+    return {
+        "step_type": "oracle_run",
+        "output": f"exit {r.get('exit_code')}" + (f", crashed: {crashed}" if crashed is not None else ""),
+        "oracle_ref": {
+            "source": "mantis_sandbox",
+            "tool": r.get("tool"),
+            "command": r.get("command"),
+            "exit_code": r.get("exit_code"),
+            "crashed": crashed,
+            "stdout": r.get("stdout_ref"),
+            "stderr": r.get("stderr_ref"),
+        },
+        "latency_ms": round((ts_end - ts_start) * 1000) if ts_start and ts_end else None,
+        "ts_start": ts_start, "ts_end": ts_end,
+    }
 
 
 # --- rendering ----------------------------------------------------------------
