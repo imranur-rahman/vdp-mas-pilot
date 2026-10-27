@@ -4,7 +4,7 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] OpenAnt at a pinned commit with a config that routes each phase to the proxy; venv pre-built
 - [ ] Phases labeled per D2; scan state captured at hand-offs and at the end
@@ -12,3 +12,7 @@
 - [ ] Dynamic tests appear as `oracle_run` steps; PoC and patch validated with CyberGym's four stages; findings normalized
 - [ ] `patch --cve` and other fetching modes off
 - [ ] Changes kept as patch files; a development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle
+
+## Comments
+
+2026-10-27: Done on integration branch `integration/pilot` (head bd76bb2). Results, spend and remaining gaps are in `docs/pilot-report.md`; code-review fixes landed in `review/fixes`.

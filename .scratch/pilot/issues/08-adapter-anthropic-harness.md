@@ -4,7 +4,7 @@
 
 **Blocked by:** 02, 03, 04
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Target definition built from the task image; whether OSS-Fuzz binaries survive the `/work`-only copy is answered and recorded
 - [ ] Egress proxy allows only LiteLLM; `--novelty` off
@@ -12,3 +12,7 @@
 - [ ] Hand-off files captured; grader re-runs appear as `oracle_run` steps
 - [ ] PoC and patch validated with CyberGym's four stages; findings normalized
 - [ ] Changes kept as patch files; a development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle
+
+## Comments
+
+2026-10-27: Done on integration branch `integration/pilot` (head bd76bb2). Results, spend and remaining gaps are in `docs/pilot-report.md`; code-review fixes landed in `review/fixes`.
