@@ -216,3 +216,38 @@ def test_adk_spans_label_each_model_call_with_its_node_name(tmp_path):
     assert [s["role"] for s in llm] == ["researcher", "patcher"]
     assert llm[0]["agent_instance_id"].startswith("researcher:")
     assert llm[1]["agent_instance_id"].startswith("patcher:")
+
+
+# --- per-node routing to the proxy (box 1) ------------------------------------
+
+def _mantis_workflow() -> dict:
+    return {
+        "name": "mantis_graph",
+        "config": {"sandbox": {"type": "static-only"}},
+        "nodes": [
+            {"id": "researcher", "type": "agent", "model": "vertex_ai/gemini-3.5-flash-lite"},
+            {"id": "patcher", "type": "agent"},
+            {"id": "findings_gate", "type": "classifier", "routes": {"a": "b"}},
+        ],
+    }
+
+
+def test_pilot_workflow_routes_every_agent_node_through_the_proxy(tmp_path):
+    wf = mantis.pilot_workflow(_mantis_workflow(), gateway="172.18.0.1", port=4000,
+                               task_image="base-builder@sha256:abc")
+    agents = {n["id"]: n for n in wf["nodes"] if n["type"] == "agent"}
+
+    # every agent node on the proxy, each with its own api_base label, a per-node
+    # alias (role label), and no model name that is a real provider model.
+    for node_id, node in agents.items():
+        assert node["api_base"] == "http://172.18.0.1:4000"
+        assert node["model"] == f"openai/pilot-mantis.{node_id}"
+    # classifier gates are code-side: never given a model.
+    gate = next(n for n in wf["nodes"] if n["type"] == "classifier")
+    assert "model" not in gate or gate.get("model") is None
+
+    # gVisor tier on the task image, no network is enforced by the tier itself.
+    sb = wf["config"]["sandbox"]
+    assert sb["type"] == "gvisor"
+    assert sb["options"]["image"] == "base-builder@sha256:abc"
+    assert sb["options"]["runtime"] == "runsc"
