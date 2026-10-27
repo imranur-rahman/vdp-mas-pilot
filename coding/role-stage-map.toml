@@ -16,7 +16,7 @@
 # role, `agent`; "prompt:<prompt_id>" keys an agent known only by its
 # system-prompt hash. Roles not listed stay unassigned.
 
-version = "2026-10-27.4-draft"
+version = "2026-10-27.5-draft"
 status = "draft: not yet agreed by two authors"
 
 # CyberGym's own claude-code baseline agent (ticket 01): one agent does every job.
@@ -65,3 +65,14 @@ chainer = ["S3", "S4"]         # exploit chains across findings
 reproducer = ["S5", "S6"]      # writes and runs a PoC in the gVisor sandbox
 patcher = ["S7", "S8"]         # writes and checks a patch
 calibrator = ["S5"]            # risk score per finding
+
+# AutoCVE (ticket 10): roles are AutoCVE's agents, labeled by per-role proxy
+# key (agentConfigs). First draft by the adapter author from its prompts; the
+# two-author mapping is still to do. Scan is deterministic (Semgrep, no model).
+[systems.autocve]
+orchestrator = ["S1"]                    # fixed plan; its key also carries the dataflow_analysis tool
+recon = ["S1", "S2"]                     # project profile, entry points, priority paths
+triage = ["S4", "S5"]                    # keeps or drops scanner findings
+finding = ["S2", "S3", "S4", "S5"]       # direct source audit, FinalizeFinding
+verification = ["S5", "S6"]              # PoC in its sandbox, verdict
+default = ["S5"]                         # task report / managed reports after the run

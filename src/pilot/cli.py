@@ -21,6 +21,14 @@ def _run_vvah(*args):
 RUNS["visa-vvah"] = _run_vvah
 
 
+def _autocve(*a):
+    from .adapters import autocve
+    return autocve.run(*a)
+
+
+RUNS["autocve"] = _autocve
+
+
 def main():
     p = argparse.ArgumentParser(prog="pilot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -37,6 +45,7 @@ def main():
     run.add_argument("system", choices=sorted(RUNS),
                      help="claude-code / claude-code-runner / visa-vvah / deepsec in/near the task container;"
                           " anthropic-harness: on the host, agents in gVisor on cybergym-internal;"
+                          " autocve: runner container on cybergym-internal;"
                           " mantis: runner container, gVisor sandboxes on the task image")
     run.add_argument("task", help="CyberGym-E2E task, e.g. md4c/arvo_31332")
     run.add_argument("--kind", choices=["dev", "data"], required=True)
