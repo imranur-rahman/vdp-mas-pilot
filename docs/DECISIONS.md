@@ -6,13 +6,13 @@ the date, and the reason in place; do not delete the question.
 | # | Question | Status | Answer |
 |---|---|---|---|
 | D1 | Where each system runs | **settled** | Task container: deepsec (Node 22 pre-installed), VVAH. Host runner container (P7): Anthropic harness (target Dockerfile `FROM` the task image, egress proxy allows only LiteLLM), AutoCVE (headless script on SQLite; Semgrep/npm audit off the internet network), OpenAnt (dynamic test on, registry exception), Mantis (`--sandbox gvisor` with the task image) |
-| D2 | Role labeling: model alias per (system, role), system-prompt fingerprint, or both | open | |
+| D2 | Role labeling | **settled** | Labels never change the model name a system sees (systems branch on it, e.g. Mantis `_is_adaptive_thinking_model`). Per-role key or URL where the system allows it (Mantis per-node `api_base`, OpenAnt per-phase provider, VVAH per-role, deepsec per-command); a system-prompt hash on every request as fallback and cross-check. Exact method per adapter ticket. Stage comes from `role-stage-map` (T-5) |
 | D3 | Trace store | **settled** | Arize Phoenix, as `method.tex` (Instrumentation) states. Review and judge input format: round 3 (Q11) |
-| D4 | Schema of one step record, and the source (proxy, native trace, artifact) of each field — fields from `sections/method.tex` "Instrumentation and Trace Collection" | open | |
+| D4 | Step record schema | **settled** | See "Step record" below |
 | D5 | When to snapshot artifacts | **settled** | At every hand-off and at the end of the run; differences between captures for files, a copy of the database file for databases (round 3) |
 | D6 | Pilot model (Claude, since the harness is Claude-only) and dollar budget per run | partly settled | Model: Claude Sonnet 5.5 everywhere (P4). Budget: open |
 | D7 | Scoring systems with partial output (VVAH: patch only; deepsec: neither; AutoCVE: PoC only) — e.g. reported location vs `patch.diff` | open | |
-| D8 | Can deepsec and AutoCVE produce any result on C/C++ tasks? If not, does the paper keep them? | open | |
+| D8 | deepsec and AutoCVE on C/C++ | **pilot decides** | Run all six on the pilot task; a system that produces nothing on C gets outcome `out_of_scope`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
 
 ## Settled principles (grilling round 1, 2026-10-26)
 
@@ -168,3 +168,21 @@ AutoCVE `b26025f`, OpenAnt `9143061`, deepsec `4fa6722`.
   matchers count.
 - The paper's contributions list (`introduction.tex`) still says "six MAS on
   two benchmarks". The handoff says the team switched to CyberGym-E2E only.
+
+## Step record (D4, round 5)
+
+One line in `steps.jsonl`. Each model call resends the whole conversation, so a
+step stores only `input_delta`; the full request is kept once, in the raw proxy log.
+
+| Field | Comes from |
+|---|---|
+| `run_id`, `task_id`, `system`, `iteration` | the runner |
+| `step_id`, `seq`, `parent_step_id`, `step_type` (llm_step, code_decision, handoff, oracle_run, refusal) | the exporter |
+| `agent_instance_id`, `role` | native traces, per-role labels (D2), prompt hash |
+| `stage` | joined later from `role-stage-map` |
+| `input_delta`, `input_prefix_hash` | proxy JSONL |
+| `output`, `thinking_summary`, `tool_calls[]` (name, args, result, timing) | proxy JSONL, native traces |
+| `prompt_id` (system-prompt hash), `skill` | proxy JSONL, the system's files |
+| `claim` (with the model and prompt that extracted it) | exporter extraction pass (T-3) |
+| `model`, `tokens` (input, output, cache), `cost_usd`, `latency_ms`, `ts_start`, `ts_end` | proxy |
+| `state_ref`, `oracle_ref`, `refusal_category`, `dropped_params` | collector, proxy |
