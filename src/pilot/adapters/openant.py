@@ -38,7 +38,7 @@ from pathlib import Path
 SYSTEM = "openant"
 UPSTREAM = "https://github.com/knostic/OpenAnt"
 COMMIT = "9143061"  # re-checked at HEAD 2026-10-27 (NOTES.md)
-RUNNER_IMAGE = "pilot-runner-openant:9143061"
+RUNNER_IMAGE = "pilot-runner-openant:9143061-p1-r3"  # -pN: N pilot patches; -rN: image recipe revision
 
 # The seven pipeline phases (README "hand-authored config"; each is a role the
 # proxy labels by its own key). Order is the pipeline's rough execution order.
@@ -196,6 +196,8 @@ def capture_state(run_dir: Path, captures_dir: Path) -> list[dict]:
 # tested at seam 2, the run itself is accepted by a dev then a data run.
 
 COLLECTOR = Path(__file__).with_name("openant_collector.py")
+CODE_ROOT = Path(__file__).resolve().parents[3]   # the code checkout (not PILOT_HOME)
+PATCHES = CODE_ROOT / "systems" / "openant" / "patches"
 IN = "/pilot"            # adapter files inside the runner container
 SCAN_DIR = "/output/scan"
 STATE_DIR = "/output/state"
@@ -207,10 +209,13 @@ def ensure_image(run_dir: Path) -> dict:
     before the run's isolation window, so its build containers are not
     attributed to the run. The per-finding dynamic-test image builds that DO
     happen during a run go through `isolation.build_image` (allowlist)."""
-    from .. import infra, isolation
-    if isolation._image_exists(RUNNER_IMAGE):
+    from .. import infra, runner
+    if runner._image_exists(RUNNER_IMAGE):
         return {"built": False, "image": RUNNER_IMAGE}
-    context = infra.REPO / "infra" / "runner" / "openant"
+    # The build context: the Dockerfile plus this adapter's patch files (P3).
+    context = run_dir / "openant" / "image_context"
+    shutil.copytree(CODE_ROOT / "infra" / "runner" / "openant", context, dirs_exist_ok=True)
+    shutil.copytree(PATCHES, context / "patches", dirs_exist_ok=True)
     started = time.time()
     r = subprocess.run(["docker", "build", "-t", RUNNER_IMAGE,
                         "--build-arg", f"OPENANT_COMMIT={COMMIT}", str(context)],
@@ -267,7 +272,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         "run_id": run_id, "system": SYSTEM, "task": task, "kind": kind, "placement": "runner_container",
         "requested_model": model, "budget_usd": budget, "timeout_s": timeout_s,
         "pilot_commit": runner._git_rev(infra.REPO), "cybergym_commit": runner._git_rev(infra.CYBERGYM),
-        "system_commit": COMMIT, "system_argv": scan_argv(repo, model),
+        "system_commit": COMMIT, "system_patches": sorted(p.name for p in PATCHES.glob("*.patch")),
+        "system_argv": scan_argv(repo, model),
         "role_labeling": "per_phase_proxy_key", "phases": list(PHASES),
         "gateway_ip": gateway, "runner_image": RUNNER_IMAGE, "started_at": time.time(),
     }
@@ -282,7 +288,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     cmd = ["bash", "-lc",
            f"install -m600 {IN}/config.json /root/.config/openant/config.json && "
            f"python3 {IN}/collector.py --state-dir {STATE_DIR} --repo /src/{repo} "
-           f"--scan-dir {SCAN_DIR} --timeout {timeout_s} -- " + " ".join(scan_argv(repo, model))]
+           f"--scan-dir {SCAN_DIR} --timeout {timeout_s} -- " + " ".join(scan_argv(repo, model))
+           + "; rc=$?; chmod -R a+rwX /output; exit $rc"]  # root-written output, readable on the host
 
     error, exit_code = None, None
     with isolation.ContainerEventLog(run_dir) as events:
@@ -304,21 +311,32 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         (run_dir / "runner_stderr.log").write_bytes(container.logs(stdout=False, stderr=True))
         container.remove(force=True)
 
-    _copy_out(workspace / "output" / "scan", oa / "scan")
-    _copy_out(workspace / "output" / "state", oa / "captures")
+    meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code,
+                key_spend={p: infra.key_spend(k) for p, k in phase_keys.items()})
+    (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
+    return finish(run_dir)
 
+
+def finish(run_dir: Path) -> Path:
+    """Post-run steps, re-runnable on a run folder: copy OpenAnt's output out of
+    the workspace, run the output adapter, and record outcome and isolation."""
+    from .. import isolation, runner
+    run_dir = Path(run_dir)
+    meta = json.loads((run_dir / "run.json").read_text())
+    oa, out = run_dir / "openant", run_dir / "workspace" / "output"
+    _copy_out(out / "scan", oa / "scan")
+    _copy_out(out / "state", oa / "captures")
+    error = meta.get("error")
     findings = []
     try:
         findings = collect_outputs(run_dir)
     except Exception as e:
         error = (error + "; " if error else "") + f"output adapter: {e!r}"
-
-    spends = {p: infra.key_spend(k) for p, k in phase_keys.items()}
-    meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code,
-                findings=len(findings), key_spend=spends,
-                total_spend_usd=round(sum((s.get("spend") or 0) for s in spends.values()), 4),
-                outcome=runner._outcome(run_dir, list(phase_keys.values()), budget, error),
-                isolation=events.verdict())
+    spends = meta.get("key_spend") or {}
+    meta.update(finished_at=meta.get("finished_at") or time.time(), error=error, findings=len(findings),
+                total_spend_usd=round(sum((s.get("spend") or 0) for s in spends.values()), 4) if spends else None,
+                outcome=runner._outcome(run_dir, list(spends), meta["budget_usd"], error),
+                isolation=isolation.isolation_verdict(isolation.read_events(run_dir)))
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
 
