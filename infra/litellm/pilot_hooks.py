@@ -34,6 +34,10 @@ REJECTED_SAMPLING = ("temperature", "top_p", "top_k")
 # they rewrite legacy `thinking: enabled + budget_tokens` (sent by Claude Code)
 # into `adaptive` after the pre-call hook has run. Pinned to LiteLLM 1.106.4;
 # tests/proxy guards both paths.
+# Request fields kept in a `request` record (the conversation and its settings;
+# never the proxy's own metadata or credentials).
+REQUEST_FIELDS = ("model", "system", "messages", "tools", "tool_choice", "thinking", "output_config",
+                  "max_tokens", "stop_sequences", "temperature", "top_p", "top_k", "stream")
 PROVIDER_ROUTING = {"order": ["anthropic"], "allow_fallbacks": False}
 
 
@@ -136,6 +140,17 @@ class PilotHooks(CustomLogger):
                 self._refusal(request_data, pilot, details)
 
     async def async_post_call_success_hook(self, data, user_api_key_dict, response):
+        if not data.get("stream"):
+            # LiteLLM logs no `complete_input_dict` for non-streamed /v1/messages
+            # calls, so keep the request as the client sent it (after pre-call).
+            pilot = _pilot_labels(data)
+            self._append(pilot.get("pilot_run_id"), {
+                "logged_at": time.time(),
+                "record": "request",
+                "litellm_call_id": data.get("litellm_call_id"),
+                "pilot": pilot,
+                "body": {k: data[k] for k in REQUEST_FIELDS if k in data},
+            })
         body = response if isinstance(response, dict) else \
             getattr(response, "model_dump", lambda: {})()
         if isinstance(body, dict) and body.get("stop_reason") == "refusal":

@@ -124,6 +124,83 @@ def normalize_findings(report: dict, cases: list[dict]) -> list[dict]:
     return out
 
 
+# --- roles and hand-offs ----------------------------------------------------------
+
+STAGE_START = re.compile(r"\[progress\] stage-start (s\d+)\b")
+STAGE_DONE = re.compile(r"\[progress\] stage-done\s+(s\d+)\s+(.*)$")
+CODE_STAGES = {"s0", "s1", "s3", "s5", "s7", "s9"}  # no model call in the default profile
+
+
+def role_windows(console: list[dict]) -> list[dict]:
+    """When each role made its model calls, from VVAH's console (D2: no per-role key).
+
+    VVAH's stages run one after another. Before S0 come the preflight probes
+    (every role's model, one probe each) and the auto-exclude survey.
+    """
+    windows, open_ = [], {}
+    first = console[0]["t"] if console else None
+    for rec in console:
+        t, line = rec["t"], rec["line"]
+        if "[probe] all model backends reachable" in line and first is not None:
+            windows.append({"role": "preflight", "stage": "preflight", "start": first, "end": t})
+        elif "[auto-step1] surveying" in line:
+            open_["auto-step1"] = t
+        elif "[auto-step1] applied overlay" in line and "auto-step1" in open_:
+            windows.append({"role": "autoexclude", "stage": "auto-step1", "start": open_.pop("auto-step1"), "end": t})
+        elif m := STAGE_START.search(line):
+            open_[m[1]] = t
+        elif (m := STAGE_DONE.search(line)) and m[1] in open_:
+            start = open_.pop(m[1])
+            if m[1] in STAGE_ROLES:
+                windows.append({"role": STAGE_ROLES[m[1]], "stage": m[1], "start": start, "end": t})
+    return windows
+
+
+def handoff_records(handoffs: list[dict], console: list[dict]) -> list[dict]:
+    """The collector's captures as hand-off steps for the exporter (`<run>/handoffs.jsonl`).
+
+    A capture at a deterministic stage's checkpoint is a `code_decision` (VVAH's
+    gates: decomposition, prefilter, dedup); one at a model stage's checkpoint
+    is a `handoff` from that stage's role. Provenance rows (`<stage>_prov`,
+    model and token bookkeeping) are not hand-offs; their captures stay in
+    `state/` and are skipped here unless the tree changed.
+    """
+    summaries = {}
+    for rec in console:
+        if m := STAGE_DONE.search(rec["line"]):
+            summaries[m[1]] = m[2].strip()
+    out = []
+    for h in handoffs:
+        step = h["step"]
+        if step.endswith("_prov") and not h.get("files_changed"):
+            continue
+        stage = step.split(".")[0].split("_")[0] if step != "end" else "end"
+        out.append({
+            "t": h["t"],
+            "stage": stage,
+            "step_type": "code_decision" if stage in CODE_STAGES else "handoff",
+            "role": STAGE_ROLES.get(stage),
+            "summary": summaries.get(stage) if stage != "end" else f"end of run, exit code {h.get('exit_code')}",
+            "state_ref": {"db": f"state/{h['db']}" if h.get("db") else None,
+                          "files_diff": f"state/{h['files_diff']}",
+                          "files_changed": h.get("files_changed") or [], "checkpoint": step},
+        })
+    return out
+
+
+def write_collector_outputs(run_dir: Path) -> None:
+    """`role_windows.json` and `handoffs.jsonl` in the run folder, for the exporter."""
+    state = Path(run_dir) / "state"
+    console = _jsonl(state / "console.jsonl")
+    (Path(run_dir) / "role_windows.json").write_text(json.dumps(role_windows(console), indent=2))
+    records = handoff_records(_jsonl(state / "handoffs.jsonl"), console)
+    (Path(run_dir) / "handoffs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+def _jsonl(path: Path) -> list[dict]:
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()] if path.exists() else []
+
+
 # --- run --------------------------------------------------------------------------
 
 def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
@@ -226,6 +303,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
 
     findings = []
     try:
+        write_collector_outputs(run_dir)
         findings = collect_findings(run_dir)
     except Exception as e:
         error = (error + "; " if error else "") + f"output adapter: {e!r}"
