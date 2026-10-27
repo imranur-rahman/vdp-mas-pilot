@@ -3,7 +3,7 @@
 Pilot for the paper on failure modes of multi-agent systems (MAS) in
 vulnerability discovery and patching (VDP). It runs six pipeline MAS on one
 CyberGym-E2E task (`curl/arvo_66012`), routes every model call through one
-LiteLLM proxy, and records the trace data the paper's failure analysis needs.
+LiteLLM proxy (backed by OpenRouter), and records the trace data the paper's failure analysis needs.
 
 Status: **planning**. No code until the open decisions in
 [docs/DECISIONS.md](docs/DECISIONS.md) are settled. The full context is in

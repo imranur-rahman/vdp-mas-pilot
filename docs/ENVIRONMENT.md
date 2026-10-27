@@ -18,7 +18,7 @@ Checked 2026-10-26 on this machine (`/home/irahman3`):
 
 - [x] Install Docker Engine; add user to `docker` group
 - [ ] `sudo sysctl -w vm.mmap_rnd_bits=28` (persist in `/etc/sysctl.d/`)
-- [ ] Clone `sunblaze-ucb/cybergym-e2e`; set `HF_TOKEN`; fetch `curl/arvo_66012`
+- [ ] Clone `sunblaze-ucb/cybergym-e2e`; set `HF_TOKEN`; fetch `md4c/arvo_31332`
 - [ ] Clone the paper repo (read-only reference for `sections/method.tex`)
 - [ ] LiteLLM proxy on the host, reachable from `cybergym-internal` via the host gateway
 - [ ] Trace store (per D3)

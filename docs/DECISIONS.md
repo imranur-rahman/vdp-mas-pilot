@@ -10,8 +10,8 @@ the date, and the reason in place; do not delete the question.
 | D3 | Trace store | **settled** | Arize Phoenix, as `method.tex` (Instrumentation) states. Review and judge input format: round 3 (Q11) |
 | D4 | Step record schema | **settled** | See "Step record" below |
 | D5 | When to snapshot artifacts | **settled** | At every hand-off and at the end of the run; differences between captures for files, a copy of the database file for databases (round 3) |
-| D6 | Pilot model (Claude, since the harness is Claude-only) and dollar budget per run | partly settled | Model: Claude Sonnet 5.5 everywhere (P4). Budget: open |
-| D7 | Scoring systems with partial output (VVAH: patch only; deepsec: neither; AutoCVE: PoC only) — e.g. reported location vs `patch.diff` | open | |
+| D6 | Model and budget | **settled** | Claude Sonnet 5.5 everywhere (P4). Total pilot budget $200: T1 smoke test $10; one run per system at a hard cap of $20 ($120); $70 reserve for re-runs; no repeated runs in the pilot. A capped run ends `budget_exhausted`. Claim extraction (our tooling) uses Claude Haiku 5.5 |
+| D7 | Scoring and false positives | **settled** | Superseded by F-1 below: verdicts per finding, plus step coding in every run |
 | D8 | deepsec and AutoCVE on C/C++ | **pilot decides** | Run all six on the pilot task; a system that produces nothing on C gets outcome `out_of_scope`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
 
 ## Settled principles (grilling round 1, 2026-10-26)
@@ -186,3 +186,38 @@ step stores only `input_delta`; the full request is kept once, in the raw proxy 
 | `claim` (with the model and prompt that extracted it) | exporter extraction pass (T-3) |
 | `model`, `tokens` (input, output, cache), `cost_usd`, `latency_ms`, `ts_start`, `ts_end` | proxy |
 | `state_ref`, `oracle_ref`, `refusal_category`, `dropped_params` | collector, proxy |
+
+## Provider, task, findings (grilling round 6, 2026-10-26)
+
+- **R-1 OpenRouter only.** The team has only an OpenRouter API key. LiteLLM
+  sends every call to OpenRouter (`anthropic/claude-sonnet-5.5`,
+  `anthropic/claude-haiku-5.5` for extraction), with the upstream provider
+  fixed to Anthropic (`provider: {order: ["anthropic"], allow_fallbacks:
+  false}`). Sonnet 5.5 thinking blocks are tied to the platform that made
+  them, and OpenRouter otherwise routes across Anthropic, Vertex, Bedrock,
+  Azure, and Claude Platform on AWS. There is no direct-Anthropic fallback.
+  T1 checks through OpenRouter: (1) summarized thinking (M-1) arrives;
+  (2) refusals carry a category (M-2); (3) prompt-cache reads and cost are
+  reported; (4) Claude Code (`claude -p`, used by the harness and deepsec)
+  works against LiteLLM's Anthropic-format endpoint with OpenRouter behind
+  it. A check that fails is recorded as a known gap in capture (and in the
+  paper's threats to validity), not worked around.
+- **R-2 Pilot task: `md4c/arvo_31332`** (replaces `curl/arvo_66012`). C,
+  md4c Markdown parser, `src.tgz` 0.23 MB (curl: 55.6 MB). Heap overflow in
+  `md_is_container_mark` (`src/md4c.c`), fixed by a one-line bounds check.
+  Real upstream test suite (`scripts/run-tests.sh`, fails on failure). Image
+  `base-builder@sha256:8eda74a1…` (already pulled). Rejected:
+  `hiredis/arvo_28777` (bug is in the fuzz harness; tests always pass),
+  `miniz/*` (different image).
+- **F-1 Verdicts per finding.** The unit of analysis is each finding a system
+  reports, plus every step of every run, including successful runs, so that
+  errors a later stage caught are also coded. CyberGym knows one bug per
+  task, so a finding that misses `patch.diff` is not automatically a false
+  positive. Verdicts: `tp_target` (matches the known bug, using the checks
+  below); `tp_other` (a different real bug, confirmed by a PoC crash at
+  another location or by two coders agreeing); `fp` (two coders agree it is
+  not a bug, using any oracle evidence); `unverified`.
+  Checks for `tp_target`, by output: PoC and patch → CyberGym's four
+  stages; patch only (VVAH) → stages 3–4; PoC only (AutoCVE) → stage 1 and
+  a stack trace that overlaps the functions changed in `patch.diff`; report
+  only (deepsec) → reported files and functions overlap `patch.diff`.
