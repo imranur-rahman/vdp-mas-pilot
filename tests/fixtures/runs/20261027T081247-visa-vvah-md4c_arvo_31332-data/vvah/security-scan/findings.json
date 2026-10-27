@@ -1,0 +1,449 @@
+{
+  "schema_version": "1.0",
+  "repo_root": "/src/md4c",
+  "repo_name": "md4c",
+  "git_sha": null,
+  "findings": [],
+  "chains": [],
+  "chains_dropped": 0,
+  "chains_deduped": 0,
+  "chains_invalid": 0,
+  "unpromoted_links": [],
+  "dropped": [],
+  "raw_findings_count": 0,
+  "metrics": {
+    "scan_id": "2026-10-27T12:15:41Z__md4c",
+    "module_name": "md4c",
+    "start_ts": "2026-10-27T12:15:41Z",
+    "end_ts": "2026-10-27T12:17:09Z",
+    "duration_sec": 88.0,
+    "total_files_in_scope": 15,
+    "analyzed_files_unique": 4,
+    "chunks_total": 7,
+    "chunks_risk": 0,
+    "chunks_catchall": 0,
+    "chunks_specialist": 0,
+    "chunks_attempted": 7,
+    "chunks_failed": 0,
+    "deepdive_skipped": false,
+    "errors_by_stage": {},
+    "errors_log_path": "",
+    "loc_in_scope_by_language": {
+      "other": 644,
+      "c-cpp": 8505
+    },
+    "loc_scanned_by_language": {
+      "c-cpp": 8106
+    },
+    "raw_findings_count": 0,
+    "true_positive_count": 0,
+    "false_positive_count": 0,
+    "duplicate_count": 0,
+    "discovered_true_positive_count": 0,
+    "repeat_clone_true_positive_count": 0,
+    "ev_rescued_count": 0,
+    "prompt_tokens": 1065396,
+    "completion_tokens": 5781,
+    "total_tokens": 1071177,
+    "tokens_by_phase": {
+      "unscoped": {
+        "prompt": 5233,
+        "completion": 88,
+        "cache_read": 2583,
+        "cache_write": 5143,
+        "calls": 3,
+        "cache_unparsed": 0,
+        "usd": null,
+        "turns": 3,
+        "reasoning": 0
+      },
+      "s1-autoexclude": {
+        "prompt": 3534,
+        "completion": 51,
+        "cache_read": 0,
+        "cache_write": 1076,
+        "calls": 1,
+        "cache_unparsed": 0,
+        "usd": null,
+        "turns": 1,
+        "reasoning": 0
+      },
+      "s2-threatmodel": {
+        "prompt": 47418,
+        "completion": 2778,
+        "cache_read": 25590,
+        "cache_write": 47376,
+        "calls": 3,
+        "cache_unparsed": 0,
+        "usd": null,
+        "turns": 3,
+        "reasoning": 0
+      },
+      "s4-deepdive": {
+        "prompt": 1009211,
+        "completion": 2864,
+        "cache_read": 1899725,
+        "cache_write": 622792,
+        "calls": 14,
+        "cache_unparsed": 0,
+        "usd": null,
+        "turns": 14,
+        "reasoning": 0
+      }
+    },
+    "reported_cost_usd": null,
+    "priced_cost_usd": null,
+    "folders_scanned": [
+      ".",
+      "src"
+    ],
+    "scope": [
+      {
+        "name": "threat-t1",
+        "kind": "threat",
+        "files": [
+          "src/md4c.c"
+        ]
+      },
+      {
+        "name": "threat-t2",
+        "kind": "threat",
+        "files": [
+          "src/md4c.c"
+        ]
+      },
+      {
+        "name": "threat-t3",
+        "kind": "threat",
+        "files": [
+          "src/md4c-html.c",
+          "src/md4c.c"
+        ]
+      },
+      {
+        "name": "threat-t4",
+        "kind": "threat",
+        "files": [
+          "src/md4c-html.c"
+        ]
+      },
+      {
+        "name": "threat-t6",
+        "kind": "threat",
+        "files": [
+          "src/entity.c",
+          "src/md4c-html.c"
+        ]
+      },
+      {
+        "name": "threat-t5",
+        "kind": "threat",
+        "files": [
+          "src/md4c.c"
+        ]
+      },
+      {
+        "name": "threat-t7",
+        "kind": "threat",
+        "files": [
+          "src/entity.c",
+          "src/entity.h",
+          "src/md4c-html.c"
+        ]
+      }
+    ],
+    "excluded": {
+      "dirs": {
+        "test": 21,
+        "scripts": 7,
+        "md2html": 5
+      },
+      "exts": {},
+      "globs": {
+        "**/LICENSE.*": 1,
+        "**/.gitignore": 1
+      },
+      "oversize": 0,
+      "oversize_files": [],
+      "symlinks": {},
+      "symlink_targets": {},
+      "config_dedup": {
+        "enabled": true,
+        "candidates": 3,
+        "clusters": 0,
+        "dropped": 0,
+        "promoted": 0
+      }
+    },
+    "s2_degraded": false,
+    "s2_threats_raw": 7,
+    "s2_threats_truncated": 0,
+    "s2_threats_promoted": 0,
+    "s2_frontier_files_excluded": 0,
+    "s2_frontier_entry_points_excluded": 0,
+    "s2_frontier_sinks_excluded": 0,
+    "s2_frontier_modules_excluded": 0,
+    "s2_assets_truncated": 0,
+    "s2_trust_boundaries_truncated": 0,
+    "s2_prompt_modules_truncated": 0,
+    "s2_prompt_entry_points_truncated": 0,
+    "s2_inventory_files_truncated": 0,
+    "s2_baseline_undisposed": [],
+    "s2_baseline_undisposed_recovered": 0,
+    "s2_repo_kinds": [
+      "native"
+    ],
+    "s2_surface_files_dropped": 0,
+    "s2_evidence_gate_rejected": 1,
+    "s2_evidence_gate_rejected_relented": 0,
+    "s3_unknown_file_ids": 0,
+    "s3_dropped_paths": 0,
+    "s3_relocated_paths": 0,
+    "s3_unreachable_files": 11,
+    "s3_threats_without_unit": 0,
+    "s4_findings_truncated": 0,
+    "s4_finding_extra_cwe_collapsed": 0,
+    "s4_unit_key_deduped": 0,
+    "s4_unit_no_outcome": 0,
+    "s4_batch_member_uninvestigated": 0,
+    "s4_batch_member_failed": 0,
+    "s4_batch_member_resubmitted": 0,
+    "s4_batch_member_recovered": 0,
+    "s4_evidence_gate_rejected": 0,
+    "s4_evidence_gate_rejected_relented": 0,
+    "deepagents_oversize_prompts": 0,
+    "deepagents_tool_state_not_roundtripped": 0,
+    "deepagents_path_jail_refused": 0,
+    "llm_truncated_replies": 0,
+    "llm_truncated_below_budget": 0,
+    "llm_adapter_evidence_gate_unenforced": 0,
+    "cli_mcp_evidence_gate_unenforced": 0,
+    "evidence_gate_stood_down_degenerate_graph": 0,
+    "s6_evidence_gate_rejected": 0,
+    "s6_evidence_gate_rejected_relented": 0,
+    "llm_turn_cap_exhausted": 0,
+    "llm_model_refusals": 0,
+    "llm_refusal_retry_attempted": 0,
+    "llm_refusal_retry_recovered": 0,
+    "llm_truncated_retry_attempted": 0,
+    "llm_truncated_retry_recovered": 0,
+    "s6_confirmed_without_vector": 0,
+    "s6_cvss_zero_impact_on_tp": 0,
+    "s6_confidence_clamped": 0,
+    "s6_confidence_uniform": 0,
+    "s6_finding_line_correction_reverted_reanchor": 0,
+    "s6_batch_structured_split": 0,
+    "s6_batch_guardrail_split": 0,
+    "s6_batch_generic_split": 0,
+    "s6_structured_retry_attempted": 0,
+    "s6_structured_retry_recovered": 0,
+    "s6_truncated_retry_attempted": 0,
+    "s6_truncated_retry_recovered": 0,
+    "s6_replayed_fp_held": 0,
+    "s6_fp_premise_contradicted": 0,
+    "s6_replayed_tp_shipped": 0,
+    "s6_outcome_members_resubmitted": 0,
+    "s6_outcome_members_recovered": 0,
+    "s2_orphan_settled": 0,
+    "s4_orphan_settled": 0,
+    "s6_orphan_settled": 0,
+    "s8_orphan_settled": 0,
+    "llm_structured_submit_rejected": 0,
+    "llm_structured_prose_reask": 0,
+    "s1_autoexclude_language_veto": 0,
+    "sdk_tool_choice_dropped_for_thinking": 0,
+    "deepagents_tool_choice_dropped": 3,
+    "s1_truncated_retry_attempted": 0,
+    "s1_truncated_retry_recovered": 0,
+    "s2_structured_retry_attempted": 0,
+    "s2_structured_retry_recovered": 0,
+    "s2_truncated_retry_attempted": 0,
+    "s2_truncated_retry_recovered": 0,
+    "s4_structured_retry_attempted": 0,
+    "s4_structured_retry_recovered": 0,
+    "s4_truncated_retry_attempted": 0,
+    "s4_truncated_retry_recovered": 0,
+    "s7_structured_retry_attempted": 0,
+    "s7_structured_retry_recovered": 0,
+    "s7_truncated_retry_attempted": 0,
+    "s7_truncated_retry_recovered": 0,
+    "s8_structured_retry_attempted": 0,
+    "s8_structured_retry_recovered": 0,
+    "s8_truncated_retry_attempted": 0,
+    "s8_truncated_retry_recovered": 0,
+    "ev_classify_truncated_retry_attempted": 0,
+    "ev_classify_truncated_retry_recovered": 0,
+    "llm_structured_retry_truncated": 0,
+    "s2_empty_retry_attempted": 0,
+    "s2_empty_retry_recovered": 0,
+    "s2_parse_repair_attempted": 0,
+    "s2_parse_repair_recovered": 0,
+    "s4_outcome_repaired_attempt": 0,
+    "s4_outcome_repaired_ok": 0,
+    "s4_batch_repaired_attempt": 0,
+    "s4_batch_repaired_ok": 0,
+    "s6_outcome_repaired_attempt": 0,
+    "s6_outcome_repaired_ok": 0,
+    "llm_call_timeouts": 0,
+    "llm_call_budget_near": 0,
+    "chunks_by_kind": {
+      "threat": 7
+    }
+  },
+  "threat_model": {
+    "system_context": "MD4C is a C library (src/md4c.c, md4c.h, md4c-html.c, md4c-html.h, entity.c, entity.h) that parses CommonMark-style Markdown from a caller-supplied byte buffer and calls back into the host application, plus an HTML renderer built on it. It is embedded as a library, not a network service. Untrusted Markdown input is the primary data entering the process, and the library's callers decide whether that input is trusted. Build and CI are CMake plus Travis/AppVeyor with -Werror and coverage. No dependency manifests, no API contract artefacts and no runtime configuration were present in the snapshot.",
+    "assets": [
+      {
+        "name": "host process memory",
+        "description": "Heap and stack of the embedding application that md4c parses into; memory-safety failures here are the main impact.",
+        "sensitivity": "high"
+      },
+      {
+        "name": "parser availability",
+        "description": "Ability of the host to parse untrusted input in bounded time and memory.",
+        "sensitivity": "medium"
+      },
+      {
+        "name": "rendered HTML output",
+        "description": "HTML produced by md_html(); correctness and escaping affect downstream consumers.",
+        "sensitivity": "medium"
+      }
+    ],
+    "trust_boundaries": [
+      {
+        "entry_point": "md_parse() input buffer (src/md4c.c)",
+        "crossing": "untrusted Markdown bytes -> parser internals",
+        "reachable_assets": [
+          "host process memory",
+          "parser availability"
+        ]
+      },
+      {
+        "entry_point": "md_html() input and callback (src/md4c-html.c)",
+        "crossing": "untrusted Markdown -> HTML renderer output",
+        "reachable_assets": [
+          "rendered HTML output",
+          "host process memory"
+        ]
+      }
+    ],
+    "threats": [
+      {
+        "id": "T1",
+        "threat": "Crafted Markdown causes out-of-bounds read or write in the parser, leading to memory corruption in the host process.",
+        "actor": "remote_unauth",
+        "surface": "md_parse() input buffer (src/md4c.c)",
+        "surface_files": [
+          "src/md4c.c"
+        ],
+        "asset": "host process memory",
+        "impact": "high",
+        "likelihood": "rare",
+        "controls": "Fuzzing history and bounds-fix commits (0.3.0 entity bounds, 0.3.3 fuzz fix); no sanitizer evidence in snapshot.",
+        "evidence": "baseline: BL-NAT-119; CHANGELOG 0.3.0 'Using bad offsets in md_is_entity_str() ... buffer overflow' (#47) and 0.3.3 'Fix input leading to a crash. Found by fuzzing' (#74)"
+      },
+      {
+        "id": "T2",
+        "threat": "Use-after-free or double-free in parser block/span tree or ref-def hashtable handling on crafted input.",
+        "actor": "remote_unauth",
+        "surface": "md_parse() input buffer (src/md4c.c)",
+        "surface_files": [
+          "src/md4c.c"
+        ],
+        "asset": "host process memory",
+        "impact": "high",
+        "likelihood": "rare",
+        "controls": "none evident in structural snapshot; source not read.",
+        "evidence": "baseline: BL-NAT-416; ref-def hashtable and attribute free paths exist in md4c.c (CHANGELOG 0.3.0 md_free_attribute on uninitialized data, CID [REDACTED-CVV]544)"
+      },
+      {
+        "id": "T3",
+        "threat": "Integer overflow in size computation before allocation in parser or HTML renderer yields undersized buffer and heap overflow.",
+        "actor": "remote_unauth",
+        "surface": "md_parse() input buffer (src/md4c.c)",
+        "surface_files": [
+          "src/md4c.c",
+          "src/md4c-html.c"
+        ],
+        "asset": "host process memory",
+        "impact": "high",
+        "likelihood": "rare",
+        "controls": "unknown; source not inspected.",
+        "evidence": "baseline: BL-NAT-190; allocation sizes derived from input-length-driven counts in md4c.c and md4c-html.c"
+      },
+      {
+        "id": "T4",
+        "threat": "Attacker-controlled text used as a printf-style format string in parser or renderer diagnostics.",
+        "actor": "remote_unauth",
+        "surface": "md_html() input and callback (src/md4c-html.c)",
+        "surface_files": [
+          "src/md4c-html.c"
+        ],
+        "asset": "host process memory",
+        "impact": "high",
+        "likelihood": "very_rare",
+        "controls": "HTML renderer writes output via callbacks rather than printf-family calls with input; not confirmed.",
+        "evidence": "baseline: BL-NAT-134; snprintf usage present in md4c-html.c, no input-as-format pattern observed in structure"
+      },
+      {
+        "id": "T6",
+        "threat": "Input reaches a shell via system() or exec() in the library or its md2html driver.",
+        "actor": "remote_unauth",
+        "surface": "md_html() input and callback (src/md4c-html.c)",
+        "surface_files": [
+          "src/md4c-html.c",
+          "src/entity.c"
+        ],
+        "asset": "host process memory",
+        "impact": "high",
+        "likelihood": "very_rare",
+        "controls": "library has no process-spawning code by design; not confirmed in source.",
+        "evidence": "baseline: BL-NAT-78; no exec/system dependency in CMake or README; md2html is excluded from coverage and is not in the file inventory"
+      },
+      {
+        "id": "T5",
+        "threat": "Race or TOCTOU between size check and use in shared parser state when the library is used from multiple threads.",
+        "actor": "local_user",
+        "surface": "md_parse() input buffer (src/md4c.c)",
+        "surface_files": [
+          "src/md4c.c"
+        ],
+        "asset": "host process memory",
+        "impact": "medium",
+        "likelihood": "very_rare",
+        "controls": "parser state is per-call; no shared globals seen in structure.",
+        "evidence": "baseline: BL-NAT-362"
+      },
+      {
+        "id": "T7",
+        "threat": "Entity lookup in entity.c reads past the end of its table on crafted entity names, leaking adjacent memory into rendered output.",
+        "actor": "remote_unauth",
+        "surface": "md_html() input and callback (src/md4c-html.c)",
+        "surface_files": [
+          "src/entity.c",
+          "src/entity.h",
+          "src/md4c-html.c"
+        ],
+        "asset": "rendered HTML output",
+        "impact": "medium",
+        "likelihood": "rare",
+        "controls": "Bounds fix for md_is_entity_str per CHANGELOG 0.3.0; current code not read.",
+        "evidence": "CHANGELOG 0.3.0 #47 entity bounds overflow; CHANGELOG 0.4.8 #155 read beyond input size"
+      }
+    ],
+    "open_questions": [
+      "unreviewed: 5 file(s) \u2014 build and metadata files (CMakeLists.txt, src/CMakeLists.txt, md4c.pc.in, md4c-html.pc.in, CI yml) carry no security weakness class that the snapshot supports; not opened because the tool budget was exhausted.",
+      "Source bodies were not read, so every memory-safety threat is likelihood-rated from CHANGELOG history rather than confirmed in code.",
+      "Deployment exposure is unknown: whether untrusted Markdown reaches md_parse() directly or through a sanitising layer.",
+      "Whether the host application uses MD4C from multiple threads, which decides T5.",
+      "Whether md2html (excluded from coverage, not in inventory) is shipped and exposed, which decides T6."
+    ]
+  },
+  "app_profile": null,
+  "unreachable_files": null,
+  "threats_without_unit": [],
+  "summary": "No findings survived adversarial verification.",
+  "degraded": false,
+  "degraded_reason": "",
+  "enrichment_unavailable": false
+}

@@ -16,7 +16,7 @@
 # role, `agent`; "prompt:<prompt_id>" keys an agent known only by its
 # system-prompt hash. Roles not listed stay unassigned.
 
-version = "2026-10-27.1-draft"
+version = "2026-10-27.2-draft"
 status = "draft: not yet agreed by two authors"
 
 # CyberGym's own claude-code baseline agent (ticket 01): one agent does every job.
@@ -25,3 +25,15 @@ agent = ["S2", "S3", "S4", "S5", "S6", "S7", "S8"]
 
 # Adapter tickets add one table per system (vvah, deepsec, mantis,
 # anthropic-harness, openant, autocve) once the authors have mapped its roles.
+
+# Visa VVAH (ticket 05): roles are VVAH's model roles (`models.<role>` in its
+# default profile), labeled by stage window. First draft by the adapter author,
+# from VVAH's stage descriptions; the two-author mapping is still to do.
+# S0, S1, S3, S5, S7 and S9 of VVAH make no model call (code decisions).
+[systems.visa-vvah]
+autoexclude = ["S1"]          # auto-step1: which files are out of scope
+threatmodel = ["S1"]          # S2: threats an attacker would pursue
+deepdive = ["S2", "S3", "S4"] # S4: per-unit investigation with graph tools
+verify = ["S4", "S5"]         # S6: adversarial verification, verdict, CVSS
+chain = ["S3", "S5"]          # S8: multi-step attack chains, exploitability notes
+remediate = ["S7"]            # S10: fix per top finding (edits the source)

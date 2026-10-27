@@ -1,0 +1,633 @@
+{
+  "tool": "vvaharness",
+  "version": "1.5.1",
+  "started": "2026-10-27T12:15:34.688702+00:00",
+  "argv": [
+    "--repo",
+    "/src/md4c",
+    "--config",
+    "/pilot/vvah/config.yaml",
+    "--remediate"
+  ],
+  "config_profile": "/pilot/vvah/config.yaml",
+  "config_sha256": "3b6522e42e0d2473800d46de083a6fad057a4b4563e76eea28e32a9afada0b3a",
+  "config_local_sha256": "027c69713739d69cb8e05c6b19c012997e391f86e9006bd42dde3200e4b44278",
+  "ev_api_collection": null,
+  "ev_api_collection_sha256": null,
+  "models": {
+    "autoexclude": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "preprocess": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": null
+    },
+    "threatmodel": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "decompose": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": null
+    },
+    "deepdive": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "verify": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "dedup": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "chain": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "remediate": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": null
+    },
+    "validate": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "exploit_verification.classify": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "exploit_verification.mapper": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "exploit_verification.attacker": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    },
+    "exploit_verification.judge": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic",
+      "resolved_route": "anthropic",
+      "resolved_transport": null,
+      "use_responses_api": null,
+      "declared_via": "deepagents",
+      "effective_effort": "high"
+    }
+  },
+  "effective_scan_controls": {
+    "cache": {
+      "cache_markers": "on",
+      "cache_route": "anthropic",
+      "cache_min_block_tokens": null
+    },
+    "thinking": {
+      "think_in_prompt": true
+    },
+    "refusals": {
+      "refusal_retries": 1
+    },
+    "step0": {
+      "callgraph_detection": "rules",
+      "min_graph_nodes_for_gate": 10
+    },
+    "step1": {
+      "auto_exclude": true,
+      "auto_exclude_max_tokens": 8000,
+      "auto_exclude_protect_templates": true,
+      "auto_exclude_protect_key_material": true,
+      "auto_exclude_protect_secrets": true,
+      "auto_exclude_protect_client_sinks": true,
+      "max_file_kb": 1024,
+      "config_dedup": "Config({'enabled': True, 'min_cluster_size': 5, 'keep_per_top_dir': True, 'promote_on_secret_hit': True, 'promote_on_insecure_value': True})"
+    },
+    "step2": {
+      "max_tokens": 64000,
+      "max_threats": 50,
+      "baseline": "auto",
+      "max_doc_chars": 32000,
+      "max_manifest_chars": 4000,
+      "max_modules": 100,
+      "max_entry_points": 400,
+      "max_inventory_files": 1200,
+      "bash": false,
+      "max_config_reps": 80,
+      "max_api_artefacts": 100,
+      "max_graph_files": 220,
+      "max_graph_sinks": 100,
+      "max_graph_edges": 100,
+      "graph_tools": true,
+      "require_graph": true,
+      "require_graph_rejections": 2,
+      "empty_retry": true,
+      "deadline": 400,
+      "replay_timeout": 300,
+      "resume_timeout": 300,
+      "replay_max_tokens": 16000,
+      "max_model_calls": 4
+    },
+    "step4": {
+      "parallel": 12,
+      "max_turns": 15,
+      "line_bucket": 5,
+      "max_findings_per_run": 50,
+      "max_tokens": 64000,
+      "cwe_tools": true,
+      "cwe_tool_budget": 8,
+      "graph_tool_budget": 16,
+      "planning": false,
+      "inline_source": true,
+      "evidence_gate": true,
+      "evidence_gate_refusals": 3,
+      "skills": true,
+      "effort": "high",
+      "require_graph": true,
+      "bash": false,
+      "max_model_calls": 8,
+      "batch_size": 4,
+      "split_retry": true,
+      "max_extra_cwes": 2,
+      "deadline": 600,
+      "replay_timeout": 90,
+      "resume_timeout": 90,
+      "replay_max_tokens": 16000,
+      "allowed_tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ]
+    },
+    "step5_prefilter": {
+      "line_tolerance": 5,
+      "sink_reanchor": true,
+      "sink_reanchor_max_move_lines": 40
+    },
+    "step5_detectors": {
+      "enabled": true,
+      "max_rows": 200
+    },
+    "step6_verify": {
+      "parallel": 7,
+      "min_confidence": 5,
+      "max_budget_usd": 10.0,
+      "max_turns": 20,
+      "allowed_tools": [
+        "Read",
+        "Grep"
+      ],
+      "batch_size": 4,
+      "inline_source": true,
+      "graph_tools": true,
+      "graph_tool_budget": 20,
+      "max_model_calls": 12,
+      "batch_wall_clock_ceiling": 900,
+      "batch_deadline": 530,
+      "replay_timeout": 60,
+      "resume_timeout": 90,
+      "replay_max_tokens": 12000,
+      "trait_stamps": true,
+      "reframe_enabled": false,
+      "max_tokens": 32000,
+      "split_retry": true,
+      "require_graph": false,
+      "evidence_gate_refusals": 3
+    },
+    "step7_dedup": {
+      "line_tolerance": 5,
+      "semantic": false,
+      "max_tokens": 64000,
+      "per_sink_keep": true
+    },
+    "step8": {
+      "max_tokens": 48000,
+      "timeout": 1800,
+      "max_model_calls": 1,
+      "max_turns": 2,
+      "deadline": 600,
+      "resume_timeout": 300,
+      "prompt_token_budget": 100000,
+      "severity_lift_gate": true,
+      "chain_quality_checks": true,
+      "chain_dedup": true,
+      "prompt_fact_blocks": true,
+      "hop_text": false
+    },
+    "step9": {
+      "duplicate_result_guard": true
+    },
+    "output": {
+      "posture_channel": true,
+      "emit_unreachable_appendix": false
+    },
+    "cli": {
+      "mcp_tools": true,
+      "restricted": true
+    },
+    "step_remediate": {
+      "enabled": false,
+      "enforce_policy": true,
+      "top_n_findings": 5,
+      "max_budget_usd": 10.0,
+      "max_turns": 40,
+      "allowed_tools": [
+        "Read",
+        "Grep",
+        "Edit",
+        "Write"
+      ]
+    },
+    "remediation_model": {
+      "id": "claude-haiku-5-5",
+      "via": "deepagents",
+      "provider": "anthropic"
+    },
+    "step_validate": {
+      "enabled": false,
+      "effort": "high",
+      "max_turns": 50,
+      "max_budget_usd": 15.0,
+      "max_findings": 20,
+      "timeout": 3600,
+      "allowed_tools": [
+        "Read",
+        "Grep",
+        "Glob"
+      ]
+    },
+    "validation_panel": {
+      "orchestrator": {
+        "id": "claude-haiku-5-5",
+        "via": "deepagents",
+        "provider": "anthropic",
+        "resolved_route": "anthropic",
+        "declared_via": "deepagents"
+      },
+      "security_architect": {
+        "id": "claude-haiku-5-5",
+        "via": "deepagents",
+        "provider": "anthropic",
+        "resolved_route": "anthropic",
+        "declared_via": "deepagents"
+      },
+      "penetration_tester": {
+        "id": "claude-haiku-5-5",
+        "via": "deepagents",
+        "provider": "anthropic",
+        "resolved_route": "anthropic",
+        "declared_via": "deepagents"
+      },
+      "cross_repo_analyzer": {
+        "id": "claude-haiku-5-5",
+        "via": "deepagents",
+        "provider": "anthropic",
+        "resolved_route": "anthropic",
+        "declared_via": "deepagents"
+      }
+    },
+    "input_hashes": {
+      "cve_file": {
+        "path": "../../../inputs/known_cves.json",
+        "sha256": null
+      },
+      "controls_file": {
+        "path": "../../../inputs/design_controls.yaml",
+        "sha256": null
+      },
+      "cmdb_file": {
+        "path": "../../../inputs/cmdb.csv",
+        "sha256": null
+      },
+      "policy_file": null,
+      "playbook_file": null
+    }
+  },
+  "target_git_sha": null,
+  "exit_code": 0,
+  "ended": "2026-10-27T12:17:10.300423+00:00",
+  "duration_sec": 94.7,
+  "stages": {
+    "s0": {
+      "label": "Step 0 \u2014 Static seed (rules)",
+      "outcome": "completed",
+      "duration_sec": 1.57,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": null,
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s1": {
+      "label": "Step 1 \u2014 Pre-process (claude-haiku-5-5 [deepagents])",
+      "outcome": "completed",
+      "duration_sec": 2.93,
+      "tokens": {
+        "prompt": 3534,
+        "completion": 51,
+        "cache_read": 0,
+        "cache_write": 1076,
+        "calls": 1
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s2": {
+      "label": "Step 2 \u2014 Threat model (claude-haiku-5-5 [deepagents])",
+      "outcome": "completed",
+      "duration_sec": 27.37,
+      "tokens": {
+        "prompt": 47418,
+        "completion": 2778,
+        "cache_read": 25590,
+        "cache_write": 47376,
+        "calls": 3
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s3": {
+      "label": "Step 3 \u2014 Decompose (claude-haiku-5-5 [deepagents])",
+      "outcome": "completed",
+      "duration_sec": 0.01,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s4": {
+      "label": "Step 4 \u2014 Deep-dive (claude-haiku-5-5 [deepagents]; parallel=12)",
+      "outcome": "completed",
+      "duration_sec": 44.29,
+      "tokens": {
+        "prompt": 1009211,
+        "completion": 2864,
+        "cache_read": 1899725,
+        "cache_write": 622792,
+        "calls": 14
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s5": {
+      "label": "Step 5 \u2014 Enrich (snippet + evidence refs, deterministic)",
+      "outcome": "completed",
+      "duration_sec": 0.01,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s6": {
+      "label": "Step 6 \u2014 Verify (claude-haiku-5-5 [deepagents])",
+      "outcome": "completed",
+      "duration_sec": 0.0,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s7": {
+      "label": "Step 7 \u2014 Dedup (claude-haiku-5-5 [deepagents])",
+      "outcome": "completed",
+      "duration_sec": 0.0,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s8": {
+      "label": "Step 8 \u2014 Chain (claude-haiku-5-5 [deepagents])",
+      "outcome": "completed",
+      "duration_sec": 0.0,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s9": {
+      "label": "Step 9 \u2014 SARIF (app_id=-)",
+      "outcome": "completed",
+      "duration_sec": 0.0,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": null,
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s10": {
+      "label": "",
+      "outcome": "disabled",
+      "duration_sec": null,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": false,
+      "cached_from_config_sha": null
+    },
+    "s11": {
+      "label": "",
+      "outcome": "disabled",
+      "duration_sec": null,
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "calls": 0
+      },
+      "model": "claude-haiku-5-5",
+      "cost_usd": null,
+      "cost_estimated": true,
+      "cached_from_config_sha": null
+    }
+  },
+  "totals": {
+    "prompt_tokens": 1065396,
+    "completion_tokens": 5781,
+    "total_tokens": 1071177,
+    "cache_read_tokens": 1927898,
+    "cache_write_tokens": 676387,
+    "calls": 21,
+    "calls_with_usage": 21,
+    "completion_absent": 0,
+    "cache_unparsed_calls": 0,
+    "cost_usd": null,
+    "unattributed": {
+      "prompt": 5233,
+      "completion": 88,
+      "cache_read": 2583,
+      "cache_write": 5143,
+      "calls": 3
+    },
+    "cached_carryover": {
+      "prompt": 0,
+      "completion": 0,
+      "cache_read": 0,
+      "cache_write": 0,
+      "calls": 0
+    }
+  },
+  "pricing": null,
+  "pricing_status": {
+    "status": "unavailable",
+    "reason": "no pricing table configured"
+  },
+  "counters": {
+    "deepagents_tool_choice_dropped": 3,
+    "graph_tool_result_empty": 6,
+    "graph_tool_result_error": 4,
+    "graph_tool_result_hit": 7,
+    "s2_baseline_undisposed": "",
+    "s2_evidence_gate_rejected": 1,
+    "s2_graph_tool_calls_GraphCommunityOf": 1,
+    "s2_graph_tool_calls_GraphNeighbors": 1,
+    "s2_graph_tool_calls_GraphSinksInCommunity": 1,
+    "s2_model_call_budget_final_turn": 1,
+    "s2_repo_kinds": "native",
+    "s2_threats_raw": 7,
+    "s4_graph_tool_calls_GraphContext": 5,
+    "s4_graph_tool_calls_GraphImpact": 2,
+    "s4_graph_tool_calls_GraphNeighbors": 4,
+    "s4_graph_tool_calls_GraphSinksInCommunity": 3,
+    "s4_model_call_budget_final_turn": 1
+  }
+}

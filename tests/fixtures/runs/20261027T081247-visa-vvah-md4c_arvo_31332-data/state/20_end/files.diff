@@ -1,0 +1,3056 @@
+diff -ruN a/.vvaharness/skills/access-control/SKILL.md b/.vvaharness/skills/access-control/SKILL.md
+--- a/.vvaharness/skills/access-control/SKILL.md	2026-10-27 12:15:24.020012228 +0000
++++ b/.vvaharness/skills/access-control/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,63 +0,0 @@
+----
+-name: access-control
+-description: Find IDOR/BOLA, missing or incorrect authorization, horizontal and vertical privilege escalation, and multi-tenant isolation bypass — the bug is usually an absent check.
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Access Control Lens
+-
+-You are an Authorization / access-control expert. Hunt for IDOR (BOLA),
+-missing or incorrect authorization checks, horizontal/vertical privilege
+-escalation, and multi-tenant isolation bypass. The bug here is usually the
+-ABSENCE of a check — you are looking for what is NOT there.
+-
+-HARD GATE — for every finding you MUST show:
+-  (a) the entry point (controller/handler/route) and the identity it
+-      authenticates as, and
+-  (b) the object/resource it acts on and WHERE ownership/tenant/role is
+-      verified for THAT object.
+-If (b) exists and is correct, DROP the finding. "Endpoint requires login" is
+-NOT authorization — the question is whether the logged-in user may act on
+-THIS specific record. A target that is a FIXED/HARDCODED constant (not derived
+-from the request) is NOT attacker-varied — it is at most a single-record issue
+-with bounded blast radius, NOT arbitrary/broad object access; do not label it
+-IDOR/BOLA. Do in depth analysis to confirm first.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-- Enumerate every externally reachable handler (Spring: @RequestMapping/@Get/
+-  @Post…, JAX-RS: @Path, servlets, message listeners). For each: what object
+-  ID comes from the request (path var, query, body)? Is that ID checked
+-  against the caller's identity/tenant before load/update/delete?
+-- Direct object references: findById(request.id), repository.getOne(id),
+-  file paths or S3 keys built from request fields — can user A pass user B's ID?
+-- Missing guards: methods with @PreAuthorize/@Secured/@RolesAllowed on
+-  siblings but NOT on this one; service-layer methods callable from multiple
+-  controllers where only some callers check authz.
+-- Vertical escalation: admin-only operations reachable via non-admin routes;
+-  role checks that compare strings case-sensitively or trust a role claim
+-  from the request body/JWT without signature verification.
+-- Mass assignment: request DTO bound directly to an entity (Spring
+-  @ModelAttribute / Jackson into JPA entity) letting a caller set owner_id,
+-  role, isAdmin, tenantId, price.
+-- Multi-tenant leakage: queries that filter by id but not tenant_id; caches
+-  or singletons keyed only by object id.
+-- Destructive bulk operations: deleteAll() / truncate / "DELETE FROM t" or a
+-  bulk UPDATE with no WHERE / owner / tenant scope, or a schema reset/drop
+-  reachable from a request — one call wipes or overwrites every record, not
+-  just the caller's. Treat an unscoped destructive bulk op as a first-class
+-  high-impact finding, not a lesser issue.
+diff -ruN a/.vvaharness/skills/batch-etl/SKILL.md b/.vvaharness/skills/batch-etl/SKILL.md
+--- a/.vvaharness/skills/batch-etl/SKILL.md	2026-10-27 12:15:24.020022349 +0000
++++ b/.vvaharness/skills/batch-etl/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,59 +0,0 @@
+----
+-name: "batch-etl"
+-description: "Find defects specific to batch and ETL paths: unvalidated bulk input, injection through generated statements, and trust placed in upstream-written data."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Batch Etl Lens
+-
+-You are a Batch / ETL data-pipeline expert. The target is a file-in →
+-transform → file-out job (mainframe-migrated or scheduler-driven). The
+-attacker model is: an upstream producer, scheduler/operator parameter, or
+-shared landing directory — NOT an interactive web user.
+-
+-HARD GATE — for every finding cite (a) the externally-influenced value
+-(job parameter, env var, upstream record field, filename in a watched dir)
+-and (b) the file:line where it reaches a path, command, SQL, or output
+-record WITHOUT validation. If both producer and consumer are inside the
+-same trust domain and the value cannot be set by a lower-privileged party,
+-DROP it.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-- Job parameters / env vars (sys.argv, os.environ, JCL PARM=, scheduler
+-  variables) flowing into open()/Path()/shutil.* / os.remove without a
+-  fixed base-directory + realpath check — path traversal lets an upstream
+-  caller read/overwrite arbitrary files as the batch service account
+-- Output filenames or staging dirs derived from input RECORD fields
+-  (account no, merchant id) — traversal / collision via crafted records
+-- Shared landing / spool directories: glob('*.dat') or "pick newest by
+-  mtime" where any writer to that dir can plant a file the job will
+-  ingest or overwrite (TOCTOU / untrusted-producer)
+-- Fixed-width / packed-decimal (COMP-3) / EBCDIC parsing: length taken
+-  from the record header and used to slice/seek without capping to the
+-  buffer; sign-nibble / zone-nibble not validated → negative amounts or
+-  index wrap; off-by-one between COBOL 1-based PIC offsets and Python
+-  0-based slices
+-- Record-count / hash-total trailer NOT verified against the body —
+-  truncation or injection of extra records goes undetected
+-- Emitted CSV / report files: cells sourced from input records written
+-  without stripping leading = + - @ (formula injection into downstream
+-  Excel consumers)
+-- subprocess / os.system invoking sort, sftp, gpg, db loaders with
+-  arguments built from job params or record fields
+-- Idempotency / restart: checkpoint files or "processed" markers in a
+-  world-writable dir; rerun after partial failure double-posts records
+diff -ruN a/.vvaharness/skills/client-side/SKILL.md b/.vvaharness/skills/client-side/SKILL.md
+--- a/.vvaharness/skills/client-side/SKILL.md	2026-10-27 12:15:24.020624644 +0000
++++ b/.vvaharness/skills/client-side/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,110 +0,0 @@
+----
+-name: client-side
+-description: "Weaknesses in browser-delivered code — JS/TS, JSX/TSX, Vue, Svelte, Angular, HTML, templates, bundler and Docker config. DOM XSS and code-exec sinks, secrets in bundles or config.js, build-inlined REACT_APP_/NEXT_PUBLIC_/VITE_ env, source maps and dev servers shipped in images, tokens in localStorage or non-httpOnly cookies, client-side JWT decoding, postMessage without an origin check, permissive CORS/credentials, unvalidated redirects, prototype pollution, missing SRI, vulnerable package.json pins — and above all security decisions made only in the frontend (disabled buttons, hidden fields, is_admin render gates, a client-computed user_id) that the server never repeats. Ships probe.sh, which greps every sink class in one pass. Activate on frontend/, public/, static/, src/components/, bundler config, or .js/.jsx/.ts/.tsx/.vue/.svelte/.html files."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Client-Side Lens
+-
+-This code is already the attacker's — on their machine, in DevTools, editable before it runs.
+-**Nothing shipped to the client is secret**: keys, connection strings, source maps, an inlined
+-`.env`. **A client-side control is not a security control**: `disabled`, `hidden`, an `is_admin`
+-render gate, a form schema, a client-computed ID. So **a check that exists only in the frontend
+-IS the finding** — the defect is the server-side absence it conceals. Nothing upstream hands you
+-frontend code; go look.
+-
+-## Run the probe first
+-
+-`sh .vvaharness/skills/client-side/probe.sh [root]`
+-
+-Read-only, ~1s. It greps every client-side sink class at once, including the *server* lines that
+-read client-sent parameters, and skips test, mock, story and example paths, which are not
+-shipped. Sections are CWE-labelled and print `path:line` or `(none)`. A *missing* section means
+-the probe broke; `... N hits total` means the cap truncated, so grep that class yourself. It
+-locates, it decides nothing below.
+-
+-## HARD GATE — a finding requires ALL of
+-
+-1. **A construct with a line span** — sink call, storage write, literal secret, listener, build
+-   key, pin. Not "the SPA should validate input".
+-2. **A named consequence to an asset** — which credential leaks, which account is acted on, what
+-   the attacker executes.
+-3. **For a "the frontend enforces X" claim, the server gap in hand** — the handler trusts the
+-   client value or omits the check. Unreachable backend: unverified, downgrade, never assert.
+-4. **Exactly one most-specific CWE**, `CweGuidance`-checked: `innerHTML` XSS is CWE-79 not
+-   CWE-20, client-enforced authorization CWE-602 not CWE-284, a server trusting a client
+-   `user_id` CWE-639 not CWE-863.
+-
+-## Judgement the probe cannot make
+-
+-- **Client-supplied identity — highest value here.** Client sends `user_id`/`role`/`amount`;
+-  handler reads `data.get('user_id')` instead of the authenticated principal. CWE-639 **at the
+-  server line**, client line as evidence. Probe prints both halves; read the handler.
+-- **Client-side JWT decode is unauthenticated parsing** — a claim used as identity or permission
+-  trusts a payload the client mints.
+-- **Build-inlined env is published**; ask only whether the value is secret.
+-- **Origin checks by `indexOf`/`startsWith`/`endsWith`** pass `https://trusted.evil.com`; only
+-  strict equality against an allow-list refutes. `postMessage(data,'*')` with a token is CWE-201.
+-- **A base URL from `window.location.hostname`** sends every `Bearer` where the Host header
+-  points; with cross-origin `credentials:'include'`, check the server for middleware reflecting
+-  the request `Origin` with `Allow-Credentials: true` — a full same-origin-policy bypass.
+-- **In the shipped-artifacts section**: a dev-server `CMD` ships hot reload and source maps
+-  (CWE-489); `COPY . .` with no `.dockerignore` entry sweeps in `.env`/`.git`; no lockfile beside
+-  `npm install` means `^` resolved at build time, so what ships is unpinned.
+-- **Toggles that persist nowhere** (2FA checkbox on `useState`, no request) have no server side
+-  at all — you see it only by reading the component.
+-- **A password form with only a new-password field** misses re-authentication (CWE-620).
+-- `startsWith('/')` does not refute a redirect (`//evil.com` is protocol-relative), and a bound
+-  only in markup (`step="0.01"`) is no bound — check the handler rejects negatives.
+-
+-## FP CHECKS — what REFUTES
+-
+-- **A sanitizer on the path** (probe's sanitizer section); React/Vue/Svelte interpolation escapes
+-  by default and is **not** a finding.
+-- **Sink value is a literal or closed enum**; `setTimeout` given a function reference;
+-  `setAttribute` on a non-URL, non-`on*` attribute.
+-- **The "secret" is public by design** — the probe flags the known-public prefixes (`pk_live_`,
+-  Firebase, Sentry DSN, Maps). Name which, and refute.
+-- **The server repeats the check**: identity from the verified principal, amount re-validated,
+-  role re-checked. A client-sent id used only as a *lookup target* while the handler derives the
+-  actor (`sender_id=current_user.id`) is not CWE-639.
+-- **The pin is patched** — read the version, and name it in the finding.
+-
+-Say which you checked; an unqualified frontend finding reads as a lint rule.
+-
+-## ENUMERATION RULE (CRITICAL — do not skip)
+-
+-One finding per distinct site, with its own file and `line_start..line_end` on the construct a
+-fix edits.
+-
+-- Anchor token storage at the **write**, not at every `getItem` — but `token` in storage and
+-  `refresh_token` in a JS cookie are two findings.
+-- Every raw-HTML sink occurrence is its own finding: different source, fix, line.
+-- Every client-supplied-identity request is its own: a password change and a transaction list
+-  each sending `user_id` are two defects, two handlers.
+-- Every vulnerable pin is its own finding.
+-- **The other axis:** one component usually holds several classes at once — token storage,
+-  client-derived identity, missing re-auth, a cleartext base URL. Before leaving a file, ask what
+-  else is wrong with it; emit each class with its own CWE.
+-- Never collapse into "frontend security issues" — a blanket finding is credited once.
+-
+-## The shape we miss
+-
+-**A client file is proof that a server-side parameter is attacker-controlled.** `frontend/src/`
+-went unread in every measured run while a whole authorization-bypass chain sat in it. Read the
+-client to learn which server parameters to distrust, then report the server line.
+diff -ruN a/.vvaharness/skills/client-side/probe.sh b/.vvaharness/skills/client-side/probe.sh
+--- a/.vvaharness/skills/client-side/probe.sh	2026-10-27 12:15:24.020905360 +0000
++++ b/.vvaharness/skills/client-side/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,199 +0,0 @@
+-#!/bin/sh
+-# Client-side sink battery: one read-only pass over a repo's browser-delivered code,
+-# printing path:line hits per CWE class (see skills/client-side/SKILL.md). Usage: sh probe.sh [root]
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-ROOT=${1:-.}
+-
+-EXC='--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build
+---exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=vendor
+---exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=bower_components
+---exclude-dir=__mocks__ --exclude-dir=__tests__ --exclude-dir=cypress --exclude-dir=e2e
+---exclude-dir=.storybook --exclude-dir=stories --exclude-dir=test --exclude-dir=tests
+---exclude=*.min.js --exclude=*-min.js --exclude=*.bundle.js --exclude=*.map
+---exclude=*.test.* --exclude=*.spec.* --exclude=*.stories.* --exclude=*.example*
+---exclude-dir=.vvaharness --exclude-dir=security-scan --exclude=SKILL.md --exclude=probe.sh'
+-
+-JS='--include=*.js --include=*.jsx --include=*.ts --include=*.tsx --include=*.mjs
+---include=*.cjs --include=*.vue --include=*.svelte'
+-
+-TPL='--include=*.html --include=*.htm --include=*.ejs --include=*.hbs --include=*.handlebars
+---include=*.pug --include=*.jade --include=*.erb --include=*.twig --include=*.mustache
+---include=*.njk --include=*.liquid'
+-
+-CFG='--include=*.json --include=*.env --include=.env* --include=*.yml --include=*.yaml
+---include=Dockerfile* --include=*.conf'
+-
+-SRV='--include=*.py --include=*.rb --include=*.php --include=*.java --include=*.go
+---include=*.cs --include=*.js --include=*.ts --include=*.kt --include=*.scala'
+-
+-CLIENT="$JS $TPL"
+-
+-# scan <label> <include-flags> <extended-regex> [cap]
+-scan() {
+-	_label=$1
+-	_inc=$2
+-	_re=$3
+-	_cap=${4:-10}
+-	printf '\n== %s ==\n' "$_label"
+-	_hits=$(grep -rEnIs $EXC $_inc -e "$_re" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$_hits" ]; then
+-		echo "(none)"
+-		return 0
+-	fi
+-	_n=$(printf '%s\n' "$_hits" | wc -l | tr -d ' ')
+-	printf '%s\n' "$_hits" | head -n "$_cap" | sed 's/\(.\{200\}\).*/\1 .../'
+-	if [ "$_n" -gt "$_cap" ]; then
+-		printf '... %s hits total, %s shown\n' "$_n" "$_cap"
+-	fi
+-	return 0
+-}
+-
+-echo "== CLIENT-SIDE PROBE =="
+-echo "root: $ROOT"
+-echo "each section is capped; '(none)' means the pattern class is absent, not that the probe failed"
+-
+-printf '\n== INVENTORY / FILES OF INTEREST ==\n'
+-python3 - "$ROOT" <<'PY' 2>/dev/null || echo "(inventory unavailable)"
+-import collections, os, sys
+-
+-root = sys.argv[1]
+-exts = {'.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.svelte', '.html', '.htm',
+-        '.ejs', '.hbs', '.handlebars', '.pug', '.jade', '.erb', '.twig', '.mustache'}
+-skip = {'node_modules', '.git', 'dist', 'build', 'coverage', '.next', 'out', 'vendor',
+-        '__pycache__', '.venv', 'bower_components'}
+-interesting = ('package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+-               '.dockerignore', '.npmrc', 'webpack.config.js', 'vite.config.js',
+-               'vite.config.ts', 'next.config.js', 'next.config.mjs', 'nuxt.config.js',
+-               'angular.json', 'setupProxy.js', 'config.js', 'constants.js',
+-               'constants.ts', 'environment.prod.ts', 'service-worker.js')
+-counts = collections.Counter()
+-dirs = collections.Counter()
+-files = []
+-for dirpath, dirnames, filenames in os.walk(root):
+-    dirnames[:] = [d for d in dirnames if d not in skip]
+-    for name in filenames:
+-        rel = os.path.relpath(os.path.join(dirpath, name), root)
+-        ext = os.path.splitext(name)[1].lower()
+-        if ext in exts and not name.endswith(('.min.js', '-min.js', '.bundle.js')):
+-            counts[ext] += 1
+-            dirs[os.sep.join(rel.split(os.sep)[:2])] += 1
+-        if (name in interesting or name.startswith('.env') or name.startswith('Dockerfile')
+-                or name.endswith('.map')):
+-            files.append(rel)
+-if counts:
+-    print('client files: ' + ', '.join('%s=%d' % kv for kv in counts.most_common()))
+-    for d, n in dirs.most_common(10):
+-        print('  %6d  %s' % (n, d))
+-else:
+-    print('client files: (none)')
+-if files:
+-    print('files of interest:')
+-    for f in sorted(files)[:30]:
+-        print('  ' + f)
+-    if len(files) > 30:
+-        print('  ... %d total' % len(files))
+-else:
+-    print('files of interest: (none)')
+-for lock in ('package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'):
+-    if os.path.exists(os.path.join(root, lock)):
+-        print('lockfile: ' + lock)
+-        break
+-else:
+-    if os.path.exists(os.path.join(root, 'package.json')):
+-        print('lockfile: NONE beside package.json -- ^ ranges resolve at build time')
+-PY
+-
+-scan 'SECRET LITERALS (CWE-798)' "$CLIENT $CFG" \
+-	'(sk_live_|sk_test_|rk_live_|AKIA[0-9A-Z]{6}|ASIA[0-9A-Z]{6}|AIza[0-9A-Za-z_-]{10}|ghp_[0-9A-Za-z]{10}|gho_[0-9A-Za-z]{10}|glpat-|xox[baprs]-|SG\.[0-9A-Za-z_-]{10}|-----BEGIN [A-Z ]*PRIVATE KEY|mongodb(\+srv)?://[^ "'"'"']*:|postgres(ql)?://[^ "'"'"']*:)' 15
+-
+-scan 'CREDENTIAL-SHAPED ASSIGNMENTS (CWE-798, CWE-540)' "$CLIENT $CFG" \
+-	'(api_?[kK]ey|apiSecret|client_?[sS]ecret|secret_?[kK]ey|access_?[kK]ey|private_?[kK]ey|password|passwd|pepper|salt|firebaseConfig|connectionString)[[:space:]]*[:=][[:space:]]*("[^"]{6,}"|'"'"'[^'"'"']{6,}'"'"')' 15
+-
+-scan 'BUILD-INLINED ENV -- published by definition (CWE-540)' "$CLIENT $CFG" \
+-	'(REACT_APP_|NEXT_PUBLIC_|VITE_|VUE_APP_|GATSBY_|NUXT_PUBLIC_|EXPO_PUBLIC_|PUBLIC_|DefinePlugin|process\.env\.[A-Z_]+)' 15
+-
+-scan 'SHIPPED ARTIFACTS / DEV SERVER (CWE-540, CWE-489)' "$CLIENT $CFG" \
+-	'(sourceMappingURL|GENERATE_SOURCEMAP|productionSourceMap|devtool[[:space:]]*:|CMD[[:space:]]*\[?.*(npm[[:space:]]+(run[[:space:]]+)?(start|dev)|react-scripts[[:space:]]+start|vite|next[[:space:]]+dev|ng[[:space:]]+serve)|^COPY \. |FROM[[:space:]]+node:(8|10|12|14|16)|debug[[:space:]]*[:=][[:space:]]*true)' 15
+-
+-scan 'HTML SINKS (CWE-79)' "$CLIENT" \
+-	'(\.innerHTML|\.outerHTML|insertAdjacentHTML|document\.write(ln)?\(|createContextualFragment|\.html\(|\.(append|prepend|after|before|replaceWith)\()' 15
+-
+-scan 'FRAMEWORK RAW-HTML ESCAPES (CWE-79)' "$CLIENT" \
+-	'(dangerouslySetInnerHTML|v-html|\[innerHTML\]|bypassSecurityTrust|\{@html|rehype-?[rR]aw|ReactMarkdown|domPropsInnerHTML|Handlebars\.SafeString|\|[[:space:]]*safe|\{\{\{)' 15
+-
+-scan 'CODE EXECUTION SINKS (CWE-95)' "$CLIENT" \
+-	'(\beval\(|new Function\(|[^a-zA-Z]Function\(["'"'"']|setTimeout\([[:space:]]*["'"'"'`]|setInterval\([[:space:]]*["'"'"'`]|new Worker\(|importScripts\(|_\.template\(|Vue\.compile\(|vm\.runIn|execScript)' 12
+-
+-scan 'NAVIGATION / URL SINKS (CWE-79, CWE-601)' "$CLIENT" \
+-	'(location[[:space:]]*=[^=]|location\.(href|assign|replace)|window\.open\(|\.href[[:space:]]*=[^=]|\.action[[:space:]]*=[^=]|\.src[[:space:]]*=[^=]|srcdoc|setAttribute\([[:space:]]*["'"'"'](href|src|action|formaction|on)|javascript:|data:text/html)' 15
+-
+-scan 'TAINT SOURCES (CWE-20 inputs, not findings alone)' "$CLIENT" \
+-	'(location\.(hash|search|pathname|href)|document\.(URL|documentURI|baseURI|referrer|cookie)|window\.name|history\.state|URLSearchParams|useSearchParams|router\.(query|asPath)|useParams\(|\bevent\.data\b|\.onmessage|WebSocket\()' 15
+-
+-scan 'PROTOTYPE POLLUTION (CWE-1321)' "$CLIENT" \
+-	'(\$\.extend\([[:space:]]*true|deepmerge|lodash\.merge|_\.merge\(|_\.set\(|_\.setWith|Object\.assign\([[:space:]]*\{\}[[:space:]]*,[[:space:]]*[a-z]|__proto__|\bprototype\[|constructor\[)' 10
+-
+-scan 'POSTMESSAGE / MESSAGE LISTENERS (CWE-346, CWE-201)' "$CLIENT" \
+-	'(addEventListener\([[:space:]]*["'"'"']message|\.onmessage[[:space:]]*=|\.postMessage\()' 12
+-
+-scan 'ORIGIN CHECKS PRESENT -- refutation evidence (CWE-940)' "$CLIENT" \
+-	'(\.origin[[:space:]]*(===|==|!==|!=)|\.origin\.(indexOf|startsWith|endsWith|match|includes)|ALLOWED_ORIGIN|allowedOrigins|checkOrigin|event\.source)' 10
+-
+-scan 'FRAME / WINDOW ISOLATION (CWE-1022)' "$CLIENT" \
+-	'(<iframe|target=["'"'"']_blank|rel=["'"'"'][^"'"'"']*noopener|sandbox=|allow-scripts|window\.opener)' 10
+-
+-scan 'TOKEN / CREDENTIAL STORAGE (CWE-522, CWE-1004, CWE-1275)' "$CLIENT" \
+-	'((localStorage|sessionStorage)\.(setItem|getItem)|(localStorage|sessionStorage)\[|document\.cookie[[:space:]]*=|Cookies\.set\(|js-cookie|indexedDB|\.setItem\([[:space:]]*["'"'"'](token|jwt|access_?token|refresh_?token|api_?key|password|user))' 15
+-
+-scan 'CLIENT-SIDE JWT DECODE (CWE-807)' "$CLIENT" \
+-	'(atob\(|jwt_?[dD]ecode|jwtDecode|decodeJwt|jose\.decode|split\(["'"'"']\.["'"'"']\)|Buffer\.from\([^,]*,[[:space:]]*["'"'"']base64)' 12
+-
+-scan 'SECRETS IN CLIENT LOGS (CWE-532)' "$CLIENT" \
+-	'console\.(log|info|debug|warn|error|table)\([^)]*(token|jwt|password|passwd|secret|api_?key|apiKey|ssn|cvv|card_?number|authorization)' 10
+-
+-scan 'CLIENT-ONLY AUTHZ / RENDER GATES (CWE-602)' "$CLIENT" \
+-	'(is_?[aA]dmin|isSuperuser|isStaff|isOwner|(user|auth|currentUser|me|profile|account)\.role|\.role[[:space:]]*(===|==|!==|!=)[[:space:]]*["'"'"'](admin|superuser|root|owner|manager|staff|editor)|hasPermission|hasRole|canActivate|AuthGuard|RequireAuth|isAuthenticated|\.permissions|v-if=["'"'"'][^"'"'"']*(role|admin|permission)|\{[[:space:]]*(user|auth|currentUser)[.a-zA-Z_]*[[:space:]]*&&)' 15
+-
+-scan 'CLIENT-ONLY WRITE GATES / FORM VALIDATION (CWE-602)' "$CLIENT" \
+-	'(disabled[[:space:]]*=|readOnly|readonly|type=["'"'"']hidden["'"'"']|maxLength|minLength|pattern=|[[:space:]]required[[:space:]>/]|step=["'"'"']|yup\.|zod|z\.object|Joi\.|useForm\()' 12
+-
+-scan 'CLIENT-SUPPLIED IDENTITY / AMOUNT -- client send (CWE-639)' "$CLIENT" \
+-	'(user_?[iI]d|account_?[iI]d|tenant_?[iI]d|customer_?[iI]d|owner_?[iI]d|org_?[iI]d|is_?admin|[^a-zA-Z](amount|price|balance|quantity|discount|total)[[:space:]]*[:=][^=]|(role|is_?admin)[[:space:]]*[:=][[:space:]]*["'"'"']?(admin|superuser|owner|manager|staff|true))' 15
+-
+-scan 'SERVER READS THAT PARAMETER -- the actual defect (CWE-639)' "$SRV" \
+-	'((get|\[)[[:space:]]*\(?["'"'"'](user_?id|account_?id|tenant_?id|customer_?id|owner_?id|role|is_?admin|amount|price|balance)["'"'"']|(body|query|params|payload)\.(userId|accountId|tenantId|role|isAdmin|amount|price))' 15
+-
+-scan 'REQUEST / TRANSPORT CONFIG (CWE-942, CWE-319)' "$CLIENT $CFG" \
+-	'(mode:[[:space:]]*["'"'"']no-cors|credentials:[[:space:]]*["'"'"']include|withCredentials|Access-Control-Allow-Origin|Allow-Credentials|rejectUnauthorized|NODE_TLS_REJECT_UNAUTHORIZED|window\.location\.(hostname|protocol|host)|"proxy"[[:space:]]*:|setupProxy|http://[a-zA-Z0-9.-]+)' 15
+-
+-scan 'OPEN REDIRECT (CWE-601)' "$CLIENT" \
+-	'((location\.href|location\.replace|location\.assign|navigate\(|router\.(push|replace)\(|window\.open\()[^;]*(next|returnUrl|return_to|redirect|continue|callback|from|target|url)|http-equiv=["'"'"']refresh)' 12
+-
+-scan 'DEPENDENCY PINS with versions (CWE-1104, CWE-1395)' '--include=package.json --include=bower.json' \
+-	'"[@a-zA-Z0-9._/-]+"[[:space:]]*:[[:space:]]*"[~^>=<* ]*[0-9x]' 40
+-
+-scan 'EXTERNAL SCRIPTS / SRI (CWE-353)' "$TPL $JS" \
+-	'(<script[^>]*src=["'"'"'](https?:)?//|<link[^>]*href=["'"'"']https?://|integrity=|crossorigin=)' 12
+-
+-scan 'PUBLIC-BY-DESIGN KEYS -- refutation evidence' "$CLIENT $CFG" \
+-	'(pk_live_|pk_test_|firebaseConfig|authDomain|messagingSenderId|ingest\.sentry\.io|sentry.{0,10}[dD][sS][nN]|maps\.googleapis\.com|recaptcha|VITE_PUBLIC|NEXT_PUBLIC_(SITE|URL|BASE))' 10
+-
+-scan 'SANITIZERS / SAFE SINKS PRESENT -- refutation evidence' "$CLIENT" \
+-	'(DOMPurify|sanitize-?[hH]tml|sanitizeHtml|\bxss\(|escapeHtml|escape\(|textContent|innerText|encodeURIComponent|DomSanitizer|helmet|CSP|Content-Security-Policy)' 15
+-
+-printf '\n== END OF PROBE ==\n'
+-exit 0
+diff -ruN a/.vvaharness/skills/code-exploration/SKILL.md b/.vvaharness/skills/code-exploration/SKILL.md
+--- a/.vvaharness/skills/code-exploration/SKILL.md	2026-10-27 12:15:24.021022389 +0000
++++ b/.vvaharness/skills/code-exploration/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,285 +0,0 @@
+----
+-name: code-exploration
+-description: Exhaustive repository exploration procedure — Glob the whole tree into a written inventory, group it by directory, and account for every file including templates, Dockerfiles, compose and k8s manifests, nginx/uwsgi/gunicorn config, CI workflows, dotfiles, SQL migrations, static assets and __init__.py. Load FIRST, before any lens, when you are asked to map a repository, enumerate its attack surface, find entry points, decide what is in scope, or conclude that something is absent. Covers reading paginated files to the last line, following handler-to-template and handler-to-model edges with GraphImporters / GraphNeighbors, and reporting coverage gaps honestly.
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Exhaustive Repository Exploration
+-
+-This is not a vulnerability lens. It is the coverage procedure every lens runs on top of.
+-A lens pointed at 38% of a repository finds at most 38% of its bugs, and reports that
+-fraction in the confident tone of a complete answer.
+-
+-> **About the examples below.** Every path, line number and snippet in this document is an
+-> *illustration of a shape*, drawn from patterns that recur across web applications. None of
+-> them is a claim about the repository you are scanning. Never go looking for `app.py` or
+-> `routes/` because this file mentions them, and never report a finding you have not read in
+-> the tree in front of you. `Glob` tells you what actually exists; this document only tells
+-> you where to look and what the answer tends to look like.
+-
+-## The measured failure
+-
+-This procedure exists because of a repeated, measured result. On a small Python web
+-application, an unaided threat-modelling pass could name only **17 paths — 38% of the 44
+-files it claimed to have accounted for**, while `Glob **/*` returned **45**. **27 files were
+-invisible** to it: every HTML template, the entry module itself, `Dockerfile`,
+-`docker-compose.yml`, the nginx and uwsgi config, and every `__init__.py`. On a second
+-application of 23 files, only **7 paths (30%)** were nameable and an entire `frontend/` tree
+-of 14 files was never opened.
+-
+-Those gaps are where findings hide, and the two shapes below are why. Both are invisible to a
+-`*.py`-only sweep, and both were missed for the same reason: nobody opened the file.
+-
+-- **A tiny entry module carries the worst of it.** A 34-line module can hold both
+-  `app.secret_key = "super secret key"` — the key that signs every session cookie — and a 404
+-  handler that does `render_template_string(f"{error}. Requested URL was {request.path}")`,
+-  compiling an attacker-controlled request path as a Jinja template. Two classes, two CWEs,
+-  one file short enough that it reads as boilerplate. The WSGI config
+-  (`module = app:app` in a `uwsgi.ini`) is what tells you that file is the live entry point.
+-- **The client names the victim, in a file the backend sweep never opens.** A frontend
+-  component decodes the JWT it already holds —
+-  `const userId = JSON.parse(atob(token.split('.')[1])).user_id` — and POSTs that id in the
+-  request body. The handler then does `user_id = data.get('user_id')` →
+-  `User.query.get(user_id)` → `user.set_password(...)`, never reading the authenticated
+-  principal its `@token_required` decorator bound one line earlier. The unread frontend file
+-  is the proof that the id is client-supplied and trivially swappable; without it the handler
+-  looks like it is merely trusting its own input.
+-
+-## HARD GATE — every finding you emit from this pass requires all four
+-
+-1. **An inventory exists, written down, before any conclusion.** The `Glob` output, grouped by
+-   directory, with a count. Not "I looked around".
+-2. **The file was opened and read to its last line.** Not a `Grep` hit with two lines of
+-   context. Not the first page of a paginated `Read`.
+-3. **A repo-relative path and a real `line_start..line_end`** copied from the numbered `Read`
+-   output, plus exactly one most-specific CWE id.
+-4. **For any absence claim** — no auth, no escaping, no rate limit, no TLS — name the files
+-   you opened looking for the control. An absence asserted against an unread directory is not
+-   a finding, it is the shape of one.
+-
+-## 1. Enumerate before you read
+-
+-`Glob` first, always, and never start from the file you were handed.
+-
+-```
+-**/*            → every path, dotfiles included; this is the inventory
+-```
+-
+-Then split the inventory by directory and write the group list down as your plan. The shape of
+-that plan, for a mid-sized Flask-style application, is a census like:
+-
+-```
+-<root> (11)  routes/ (7)  templates/ (9)  templates/partials/ (2)
+-models/ (5)  forms/ (6)   utils/ (3)      conf/ (1)  static/ (1)     = 45
+-```
+-
+-Mark each group open or closed as you go, and make the counts sum to the inventory size. The
+-sum is the point: a census that does not add up is a census with a directory missing from it.
+-
+-**Coverage is the set difference between the inventory and the set of files you have opened.**
+-Compute it explicitly before you stop. If the difference is non-empty you are not done, you
+-are mid-pass.
+-
+-Three ways the inventory itself lies, all of which you must check for:
+-
+-- **`Glob` truncates at 500 hits**, appending `... (N more)`. If you see that line, your
+-  inventory is a prefix — narrow by subtree (`routes/**`, `frontend/**`) until every group
+-  returns whole.
+-- **Scope exclusions are invisible in `Glob` but loud in `Read`.** A path outside the scan
+-  scope returns `ERROR: path '<p>' is excluded from the scan scope (not in the scanned file
+-  inventory)`. That is a third state, neither read nor unread — record it as excluded, not as
+-  clean.
+-- **Do not substitute a graph node list for the inventory.** The graph walk skips the entire
+-  dot-namespace — files like `.dockerignore`, `.prettierrc` and `.pylintrc` exist in the tree
+-  and none is a file node. `Glob` returns them. Glob is the inventory; the graph is an index
+-  over part of it.
+-
+-## 2. The file classes a source-only sweep skips
+-
+-Each of these carries findings and each is invisible to a `*.py` / `*.java` / `*.js` sweep.
+-Glob them by name.
+-
+-**Templates and views** — `**/*.html`, `**/*.jinja2`, `**/*.j2`, `**/*.jsx`, `**/*.tsx`,
+-`**/*.vue`, `**/*.erb`, `**/*.jsp`, `**/*.twig`, `**/*.hbs`, `**/*.ejs`, `**/*.blade.php`.
+-The escape decision lives here, not in the handler. `Grep` templates for `| safe`,
+-`safe_columns`, `autoescape false`, `{{{`, `html_safe`, `raw(`, `dangerouslySetInnerHTML`,
+-`v-html`. That grep is usually short — a handful of lines across the whole template tree —
+-and each line it returns is a location where escaping was switched off deliberately, in the
+-form `{{ note.text | safe }}` or `render_table(rows, safe_columns=['text'])`. Short is not the
+-same as empty: read every hit.
+-
+-**Container and orchestration** — `Dockerfile*`, `**/Dockerfile`, `docker-compose*.y*ml`,
+-`**/*.tf`, `**/*.tfvars`, `k8s/**`, `**/*deployment*.y*ml`, `**/values.yaml`,
+-`**/templates/*.yaml` (Helm), `Procfile`, `uwsgi.ini`, `gunicorn.conf.py`, `**/nginx*.conf`,
+-`**/conf/*.conf`, `supervisord.conf`, `**/*.service`. These compose into single findings that
+-no one file states. A reverse-proxy config whose only listener is `listen 80 default_server`
+-with `uwsgi_pass` behind it and not one `ssl` token in the file; a compose file publishing
+-`ports: - 5000:80`; a `Dockerfile` whose `CMD` starts that proxy — four files, one cleartext
+--transport finding, zero of them `.py`.
+-
+-**CI/CD** — `.github/**`, `.gitlab-ci.yml`, `Jenkinsfile*`, `azure-pipelines.yml`,
+-`.circleci/config.yml`, `bitbucket-pipelines.yml`. Read for `pull_request_target`, unpinned
+-third-party actions, `${{ github.event.* }}` interpolated into `run:`, secrets echoed to logs.
+-
+-**Dependency manifests** — `requirements*.txt`, `pyproject.toml`, `Pipfile*`, `poetry.lock`,
+-`package.json`, `*-lock.json`, `yarn.lock`, `pom.xml`, `build.gradle*`, `go.mod`, `Gemfile*`,
+-`*.csproj`. Unpinned or ancient versions are findings; the manifest is also how you learn
+-which framework defaults apply.
+-
+-**Dotfiles and env templates** — `.env*`, `*.env.example`, `.dockerignore`, `.npmrc`,
+-`.netrc`, `.pylintrc`, `.prettierrc`, `.git-credentials`, `**/.aws/**`. Committed real values
+-are credential findings, and `.dockerignore` is how you learn what a broad
+-`COPY . /srv/app` in the `Dockerfile` did *not* exclude from the image.
+-
+-**SQL and migrations** — `**/*.sql`, `migrations/**`, `alembic/versions/**`, `db_seed.py`,
+-`**/fixtures/**`, `**/seeds/**`. Seed files ship default credentials into running systems.
+-
+-**Static assets** — `static/**`, `public/**`, `assets/**`, `**/*.map`. Source maps, API keys
+-in bundled JS, backup files served by the static handler.
+-
+-**`__init__.py`, base classes, shared helpers** — `**/__init__.py`, `**/base*.py`,
+-`**/base_*.py`, `**/middleware*`, `**/conftest.py`, `**/utils/**`. This is where
+-centrally-applied controls live, and where their absence is centrally fatal. Four shapes to
+-expect:
+-
+-- A package `__init__.py` whose entire body is `import routes.<name>` statements inside a
+-  `def init():` called once from the entry module. **That** is the route registration, so a
+-  route table reconstructed without it is short every module it names.
+-- An `__init__.py` that builds the engine — `create_engine('sqlite:///' + ..., echo=True)` —
+-  logging every SQL statement, including the ones carrying credentials.
+-- An `__abstract__ = True` base model supplying `id` and `created_at` to every subclass. Read
+-  it before claiming any model lacks either.
+-- A base template: one read of it settles a control for every template that `extends` it. If
+-  its `{% block head %}` holds three `<meta>` tags and none is a `Content-Security-Policy`,
+-  that is one finding covering the whole tree — and you only know it because you opened the
+-  parent.
+-
+-## 3. READ TO THE END
+-
+-`Read` is paginated — `read(file_path, offset=0, limit=2000)` — and its output is byte-capped,
+-so a large file returns a **prefix**. A file read halfway produces exactly the same false
+-"absent" conclusion as a file never read, and produces it with more confidence.
+-
+-- Watch the tail of every `Read` for `... [truncated]` or
+-  `…[truncated N chars to fit context — re-read a specific line range with Read offset/limit
+-  if you need more]`. Either marker means you hold a prefix.
+-- **Continue from the last line number you were shown.** `offset` is a 0-based line index and
+-  output is `cat -n` style, so a first page ending at displayed line 2000 continues at
+-  `offset: 2000`. Repeat until the tail carries no truncation marker.
+-- **Confirm you reached the end**: a `Read` whose `offset` is past the final line returns
+-  `(file is empty or offset past EOF)`. That, or a page shorter than `limit` with no truncation
+-  marker, is the proof the file is finished. Assumption is not proof.
+-- **One exception, and it is a trap.** The reader only decodes the first 800,000 characters of
+-  a file and caps each rendered page at 200,000. On a file larger than that, the EOF marker is
+-  a *false* end-of-file — it means you exhausted the window, not the file. `Grep` the file for
+-  a construct you expect near its end; if it hits at a line your pages never reached, record
+-  the file as partially read in your coverage report.
+-- Narrow with `offset`/`limit` only *after* you have seen the whole file once. `Grep` is for
+-  locating, never for concluding.
+-
+-## 4. Follow the edges
+-
+-The inventory tells you what exists; the edges tell you what a file you just read pulls into
+-scope. Both are mandatory.
+-
+-- **A handler that renders a template puts that template in scope.** A handler that builds
+-  `text(f"text like '%{search_param}%'")` into a query is one finding; the template it then
+-  renders, marking that same column as `safe_columns=['text']`, is a second one in a different
+-  file. Read the handler, miss a class; read both, get two findings.
+-- **A model the handler writes puts that model in scope** — and its base class, its migration,
+-  and any serializer that returns it.
+-- **A config key a handler reads puts the config file in scope**; a template that `extends` or
+-  `include`s another puts the parent in scope.
+-- **Use the graph with its real signatures; do not guess.**
+-  `GraphImporters(file)` → the files that import `file`.
+-  `GraphNeighbors(file, function)` → `{"callers": [...], "callees": [...]}`; it needs BOTH
+-  arguments, an exact path and an exact function name.
+-  `GraphCommunityOf(file)` → the module name, which you then hand to
+-  `GraphSinksInCommunity(community)` for the sinks already known in that cluster.
+-  `CweGuidance(cwe_id)` once you have a class in hand.
+-- **An empty graph answer is a signal, not an all-clear.** `GraphImporters` reads module-level
+-  import edges only. A module imported from inside a function body — the `def init():`
+-  registration shape above — has no module-level importer, so the graph correctly reports none
+-  while the module is plainly live. When the graph says a live module has no importer, go read
+-  the `__init__.py` yourself.
+-- Graph hits *add to* the inventory-driven sweep, never replace it. Templates, YAML, `.conf`
+-  and dotfiles are reachable only by `Glob`.
+-
+-## FP CHECKS — what refutes a finding from this pass
+-
+-Refute and say so; a refutation with a named search is a result.
+-
+-- **The control exists somewhere you had not read.** Before claiming a missing guard, open
+-  `**/__init__.py`, the base class, the blueprint/router registration, `**/middleware*`, and
+-  the reverse-proxy config. A `before_request`, a decorator applied at blueprint level, or an
+-  nginx `auth_request` refutes it.
+-- **The template escapes after all.** Jinja and ERB autoescape by default. Only an explicit
+-  `| safe`, `safe_columns=`, `autoescape=False`, `{{{`, `raw()`, `html_safe`, `v-html` or
+-  `dangerouslySetInnerHTML` defeats it. No such marker → no XSS from that render.
+-- **The file is not shipped.** `.dockerignore` / `.gitignore` excludes it from the image, it
+-  lives under `tests/`, or it is documentation (`docs/**`, `course/**`, `*.md`). Prose
+-  describing a vulnerability is not the vulnerability — do not report a write-up of a bug as
+-  the bug.
+-- **The config is an example.** `*.example`, `*.sample`, `*.template` with placeholder values
+-  are not credential leaks. Real-looking values in a live `.env` or a seed script are.
+-- **The value is a fixed literal**, not attacker-varied.
+-- **You only read a prefix.** If you cannot state that you reached the last line, the finding
+-  is not gated yet. Finish the read.
+-
+-## ENUMERATION RULE
+-
+-**One finding per distinct site, each with its own file and its own line span.** Three
+-templates disabling escaping on the same field is three findings, at three template paths,
+-because each is an independent edit a fix must make.
+-
+-The same rule survives contact with a noisy grep. Sweeping a weak-hash call across a backend
+-typically returns a mix you must sort, not a count you can report: a `set_password` that does
+-`self.password_hash = hashlib.md5(password.encode()).hexdigest()`, the identical expression
+-inlined into a registration handler in another file, and the verifier that compares against
+-that same digest. The first two are two independent password-writing sites, so two findings at
+-two anchors in two files. The third is a hit to judge — it reads the digest rather than
+-writing it — not a third finding to bank. State which you counted and why.
+-
+-Never collapse sites into an omnibus "output encoding missing across templates" or "insecure
+-deployment configuration". A blanket finding can be credited, tracked and fixed exactly once,
+-so the remaining sites ship. Equally: do not pad — the *same* construct reported twice is a
+-duplicate, not coverage.
+-
+-Before leaving a file you have already read, ask what *else* is wrong with it. The entry-module
+-shape at the top of this document is the reminder: a hardcoded signing key and an SSTI sink can
+-share one short file. Two classes, two CWEs, two findings, one file you already had open.
+-
+-## Report coverage honestly
+-
+-Close the pass with the arithmetic:
+-
+-- Inventory size, files opened, files read to the end, files refused as out of scope.
+-- **The named list of what you did not finish, and why** — deadline, size, binary, excluded.
+-  A vendored minified asset skipped as vendored is a fine entry. `frontend/ (14 files) not
+-  read — ran out of turns` is a fine entry.
+-- Which directory groups are closed and which are open.
+-
+-A visible gap is recoverable: the next agent, or the next stage, picks it up. A silent gap is
+-permanent, and in the output it is indistinguishable from clean coverage.
+-
+-## The inventory decides when you are done
+-
+-Not intuition, not "I have enough for a good report", not the point at which findings stop
+-arriving. Exploration ends when the set difference between the inventory and the files you have
+-read to the end is empty, or when every remaining element of it is listed in your coverage
+-report with a reason. Those are the only two endings.
+diff -ruN a/.vvaharness/skills/code-exploration/probe.sh b/.vvaharness/skills/code-exploration/probe.sh
+--- a/.vvaharness/skills/code-exploration/probe.sh	2026-10-27 12:15:24.021625082 +0000
++++ b/.vvaharness/skills/code-exploration/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,223 +0,0 @@
+-#!/bin/sh
+-# Inventories the file classes a source-only sweep skips (templates, container/IaC, CI, manifests,
+-# dotfiles, SQL, static, central controls) and runs the escape / transport / CI pattern batteries.
+-# Read-only, output-capped, always exits 0. Usage: sh probe.sh [root]   (root defaults to .)
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-set -f
+-
+-ROOT="${1:-.}"
+-cd "$ROOT" 2>/dev/null || { echo "== PROBE ABORTED: cannot enter '$ROOT' =="; exit 0; }
+-
+-PRUNE=".git .vvaharness node_modules __pycache__ .venv venv .tox .nox .mypy_cache .pytest_cache .ruff_cache .idea .gradle target"
+-EXCL=""
+-for d in $PRUNE; do EXCL="$EXCL --exclude-dir=$d"; done
+-
+-TPL="--include=*.html --include=*.htm --include=*.jinja --include=*.jinja2 --include=*.j2
+---include=*.jsx --include=*.tsx --include=*.vue --include=*.erb --include=*.jsp --include=*.twig
+---include=*.hbs --include=*.handlebars --include=*.ejs --include=*.php --include=*.mustache
+---include=*.pug --include=*.haml --include=*.svelte --include=*.astro"
+-
+-SRC="--include=*.py --include=*.rb --include=*.js --include=*.ts --include=*.jsx --include=*.tsx
+---include=*.java --include=*.go --include=*.php --include=*.cs --include=*.kt --include=*.scala"
+-
+-CFG="--include=*.conf --include=*.ini --include=*.cfg --include=*.yml --include=*.yaml
+---include=*.toml --include=*.json --include=*.properties --include=*.env --include=*.xml"
+-
+-sec() { echo; echo "== $1 =="; }
+-
+-emit() { if [ -z "$1" ]; then echo "(none)"; else printf '%s\n' "$1"; fi; }
+-
+-echo "== PROBE ROOT =="
+-pwd
+-echo "pruned dirs: $PRUNE"
+-
+-# ---------------------------------------------------------------- file classes
+-if command -v python3 >/dev/null 2>&1; then
+-python3 - "$PRUNE" <<'PY'
+-import fnmatch, os, sys
+-from collections import Counter
+-
+-prune = set(sys.argv[1].split())
+-files, pruned = [], []
+-for dirpath, dirnames, filenames in os.walk("."):
+-    keep = []
+-    for d in sorted(dirnames):
+-        if d in prune:
+-            pruned.append(os.path.join(dirpath, d)[2:])
+-        else:
+-            keep.append(d)
+-    dirnames[:] = keep
+-    for f in sorted(filenames):
+-        files.append(os.path.join(dirpath, f)[2:])
+-
+-groups = Counter(os.path.dirname(p) or "<root>" for p in files)
+-print()
+-print("== INVENTORY (%d files, %d directory groups; authoritative, not truncated) ==" % (len(files), len(groups)))
+-for d, n in sorted(groups.items(), key=lambda kv: (-kv[1], kv[0]))[:40]:
+-    print("%6d  %s" % (n, d))
+-if len(groups) > 40:
+-    print("  ... (%d more directory groups)" % (len(groups) - 40))
+-if pruned:
+-    print("PRUNED SUBTREES (not counted above): %s" % ", ".join(sorted(set(pruned))[:12]))
+-
+-CLASSES = [
+-    ("TEMPLATES AND VIEWS", [
+-        "*.html", "*.htm", "*.jinja", "*.jinja2", "*.j2", "*.jsx", "*.tsx", "*.vue", "*.erb",
+-        "*.jsp", "*.jspx", "*.twig", "*.hbs", "*.handlebars", "*.ejs", "*.blade.php",
+-        "*.mustache", "*.pug", "*.haml", "*.svelte", "*.astro"], []),
+-    ("CONTAINER / ORCHESTRATION / IaC", [
+-        "Dockerfile*", "*.dockerfile", "Containerfile*", "docker-compose*.yml",
+-        "docker-compose*.yaml", "compose.yml", "compose.yaml", "*.tf", "*.tfvars", "*.tfstate",
+-        "Procfile", "uwsgi.ini", "gunicorn*.py", "*nginx*.conf", "*.conf", "supervisord.conf",
+-        "*.service", "*.socket", "Vagrantfile", "*deployment*.yml", "*deployment*.yaml",
+-        "values.yaml", "Chart.yaml", "kustomization.yml", "kustomization.yaml", "*.pp"],
+-        ["k8s", "kubernetes", "helm", "charts", "deploy", "ansible",
+-         ".ebextensions", "terraform"]),
+-    ("CI / CD", [
+-        ".gitlab-ci.yml", "Jenkinsfile*", "azure-pipelines*.yml", ".travis.yml", ".drone.yml",
+-        "bitbucket-pipelines.yml", "cloudbuild.yml", "cloudbuild.yaml", "buildspec.yml",
+-        "buildspec.yaml", "Makefile", "*.mk"], [".github", ".circleci", ".buildkite"]),
+-    ("DEPENDENCY MANIFESTS", [
+-        "requirements*.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "Pipfile.lock",
+-        "poetry.lock", "uv.lock", "package.json", "package-lock.json", "*-lock.json", "yarn.lock",
+-        "pnpm-lock.yaml", "pom.xml", "build.gradle", "build.gradle.kts", "go.mod", "go.sum",
+-        "Gemfile", "Gemfile.lock", "*.csproj", "*.fsproj", "Cargo.toml", "Cargo.lock",
+-        "composer.json", "composer.lock"], []),
+-    ("ENV / CREDENTIAL-SHAPED DOTFILES", [
+-        ".env", ".env.*", "*.env", "*.env.example", ".dockerignore", ".npmrc", ".netrc",
+-        ".pypirc", ".git-credentials", ".gitconfig", ".htpasswd", ".htaccess", "*.pem", "*.key",
+-        "*.p12", "*.jks", "*.keystore", "id_rsa*", "*.ovpn", "credentials*"],
+-        [".aws", ".ssh", ".docker", ".gnupg", ".kube"]),
+-    ("SQL / MIGRATIONS / SEEDS", [
+-        "*.sql", "*.db", "*.sqlite", "*.sqlite3", "db_seed*", "seed*.py", "*fixture*.sql",
+-        "*.dump", "*.bak"], ["migrations", "alembic", "seeds", "seed"]),
+-    ("STATIC / BUILT ASSETS", ["*.map", "*.min.js", "*.min.css"],
+-        ["static", "public", "assets", "dist", "wwwroot", "staticfiles"]),
+-    ("CENTRAL CONTROLS (__init__, base, middleware, utils)", [
+-        "__init__.py", "base.py", "base_*.py", "base*.py", "middleware.py", "middleware*.py",
+-        "middlewares.py", "conftest.py", "decorators.py", "*decorator*.py", "permissions.py",
+-        "authz*.py", "security*.py", "app.py", "wsgi.py", "asgi.py", "main.py", "settings.py",
+-        "config.py", "urls.py", "routes.py"], ["utils", "util", "helpers", "common",
+-        "middleware", "middlewares"]),
+-]
+-
+-def hits(basenames, dirs):
+-    out = []
+-    for p in files:
+-        b = os.path.basename(p)
+-        parts = p.split(os.sep)[:-1]
+-        if any(fnmatch.fnmatch(b, g) for g in basenames) or any(x in dirs for x in parts):
+-            out.append(p)
+-    return out
+-
+-for label, basenames, dirs in CLASSES:
+-    found = hits(basenames, dirs)
+-    print()
+-    print("== %s (%d) ==" % (label, len(found)))
+-    if not found:
+-        print("(none)")
+-        continue
+-    for p in found[:15]:
+-        print("  " + p)
+-    if len(found) > 15:
+-        print("  ... (%d more)" % (len(found) - 15))
+-
+-dots = [p for p in files if any(x.startswith(".") for x in p.split(os.sep))]
+-print()
+-print("== ALL DOTFILES (%d) -- the namespace the graph walk skips entirely ==" % len(dots))
+-if not dots:
+-    print("(none)")
+-for p in dots[:20]:
+-    print("  " + p)
+-if len(dots) > 20:
+-    print("  ... (%d more)" % (len(dots) - 20))
+-
+-empty = [p for p in files if os.path.exists(p) and os.path.getsize(p) == 0]
+-print()
+-print("== ZERO-BYTE FILES (%d) ==" % len(empty))
+-emptyshown = empty[:10]
+-if not emptyshown:
+-    print("(none)")
+-for p in emptyshown:
+-    print("  " + p)
+-if len(empty) > 10:
+-    print("  ... (%d more)" % (len(empty) - 10))
+-PY
+-else
+-  sec "INVENTORY (python3 unavailable -- grep fallback, text files only)"
+-  emit "$(grep -rlI '' . $EXCL 2>/dev/null | sed 's|^\./||' | sort | head -n 60)"
+-fi
+-
+-# ------------------------------------------------------------ pattern batteries
+-sec "ESCAPE DEFEATS IN TEMPLATES (each hit is its own finding site)"
+-emit "$(grep -rEn '\|[[:space:]]*safe|safe_columns|autoescape[[:space:]]*=?[[:space:]]*(false|False|off)|\{\{\{|html_safe|\|[[:space:]]*raw|raw\(|dangerouslySetInnerHTML|v-html|innerHTML[[:space:]]*=' . $EXCL $TPL 2>/dev/null | head -n 20)"
+-
+-sec "SERVER-SIDE ESCAPE BYPASS / DYNAMIC TEMPLATE COMPILATION"
+-emit "$(grep -rEn 'mark_safe|Markup\(|render_template_string|Template\(|from_string|autoescape[[:space:]]*=[[:space:]]*False|\.html_safe|raw\(|new Function|eval\(' . $EXCL $SRC 2>/dev/null | head -n 20)"
+-
+-sec "HANDLER -> TEMPLATE EDGES (each named template is now in scope)"
+-emit "$(grep -rEn 'render_template|render_to_response|\.render\(|render_to_string|ERB\.new|TemplateResponse|@Template|ModelAndView' . $EXCL $SRC 2>/dev/null | head -n 20)"
+-
+-sec "TEMPLATE INHERITANCE EDGES (extends/include puts the parent in scope)"
+-emit "$(grep -rEn '\{%[[:space:]]*(extends|include)|@extends|@include|<%=[[:space:]]*render' . $EXCL $TPL 2>/dev/null | head -n 20)"
+-
+-sec "TRANSPORT CONFIG -- per file, is there any TLS at all?"
+-CONFS=$(grep -rlE '^[[:space:]]*listen|server_name|ssl_certificate|uwsgi_pass|proxy_pass|upstream|\[uwsgi\]|bind[[:space:]]*=' . $EXCL --include=*.conf --include=*.ini --include=*.cfg --include=*.template 2>/dev/null | head -n 12)
+-if [ -z "$CONFS" ]; then
+-  echo "(none)"
+-else
+-  printf '%s\n' "$CONFS" | while IFS= read -r f; do
+-    tls=$(grep -cEi 'ssl|https|443|tls' "$f" 2>/dev/null)
+-    lst=$(grep -cE '^[[:space:]]*listen|bind' "$f" 2>/dev/null)
+-    ttl=$(wc -l < "$f" 2>/dev/null | tr -d ' ')
+-    echo "  $f: lines=$ttl listen/bind=$lst ssl|tls|https|443 tokens=$tls"
+-  done
+-fi
+-
+-sec "PUBLISHED PORTS AND ENTRYPOINTS (compose / Dockerfile / uwsgi)"
+-emit "$(grep -rEn '^[[:space:]]*-?[[:space:]]*\"?[0-9]{2,5}:[0-9]{2,5}|EXPOSE|CMD|ENTRYPOINT|^module[[:space:]]*=|^wsgi-file|^[[:space:]]*command:' . $EXCL --include=Dockerfile --include=Dockerfile.* --include=docker-compose*.yml --include=docker-compose*.yaml --include=compose.y*ml --include=*.ini --include=Procfile 2>/dev/null | head -n 20)"
+-
+-sec "CI/CD RISK (pull_request_target, event interpolation, unpinned actions, secrets in run)"
+-emit "$(grep -rEn 'pull_request_target|workflow_run|\$\{\{[[:space:]]*github\.event|uses:[[:space:]]*[^@]+@(main|master|v?[0-9]+)([[:space:]]|$)|secrets\.|GITHUB_TOKEN|permissions:' . $EXCL --include=*.yml --include=*.yaml --include=Jenkinsfile --include=Jenkinsfile.* 2>/dev/null | head -n 20)"
+-
+-sec "SECURITY HEADER / CONTROL PRESENCE (count per header; 0 supports an absence claim)"
+-for h in Content-Security-Policy Strict-Transport-Security X-Frame-Options X-Content-Type-Options Referrer-Policy SameSite HttpOnly 'secure[ _]*=[ _]*True' COOKIE_SECURE csrf_token CSRFProtect csrf_exempt before_request login_required; do
+-  n=$(grep -rEil -- "$h" . $EXCL 2>/dev/null | wc -l | tr -d ' ')
+-  echo "  $h: $n file(s)"
+-done
+-
+-sec "DEBUG / VERBOSE-LOGGING FLAGS"
+-emit "$(grep -rEn '(debug|DEBUG)[[:space:]]*=[[:space:]]*(True|true|1)|echo[[:space:]]*=[[:space:]]*True|app\.run\(.*debug|FLASK_ENV|DJANGO_DEBUG|log_level.*debug' . $EXCL $SRC $CFG 2>/dev/null | head -n 20)"
+-
+-sec "CREDENTIAL-SHAPED ASSIGNMENTS IN CONFIG, DOTFILES AND SEEDS"
+-emit "$(grep -rEn '(secret_key|SECRET_KEY|api[_-]?key|API[_-]?KEY|password|PASSWORD|passwd|token|TOKEN|private_key|aws_secret|client_secret)[[:space:]]*[:=][[:space:]]*.?[A-Za-z0-9/+_.-]{4,}' . $EXCL $CFG --include=*.sql --include=.env --include=.env.* --include=*.env 2>/dev/null | head -n 20)"
+-
+-sec "HARDCODED SECRET LITERALS IN SOURCE (assigned to a quoted string, not a var read)"
+-emit "$(grep -rEn '(secret_key|SECRET_KEY|secret|api_key|apiKey|API_KEY|password|passwd|passphrase|token|private_key|client_secret|salt|encryption_key)[[:space:]]*=[[:space:]]*["'"'"'][^"'"'"']{3,}["'"'"']' . $EXCL $SRC 2>/dev/null | head -n 20)"
+-
+-sec "NON-TRIVIAL __init__.py AND ROUTE/BLUEPRINT REGISTRATION"
+-emit "$(grep -rEn 'register_blueprint|add_url_rule|include_router|app\.route|@bp\.|url_patterns|urlpatterns|@app\.|MethodView|APIRouter|^[[:space:]]+import[[:space:]]|^[[:space:]]+from[[:space:]]' . $EXCL --include=__init__.py --include=urls.py --include=routes.py --include=app.py --include=main.py 2>/dev/null | head -n 20)"
+-
+-sec "SQL CONSTRUCTION AND SEED CREDENTIALS"
+-emit "$(grep -rEn '(^|[^_[:alnum:]])(text|execute|executemany|executescript|raw|rawQuery)\(|cursor\.|createQuery|(SELECT|INSERT INTO|UPDATE|DELETE FROM)[^;]*(\{|%s|\+|\|\||f\"|\$)|CREATE USER|GRANT ALL|IDENTIFIED BY' . $EXCL $SRC --include=*.sql 2>/dev/null | head -n 20)"
+-
+-sec "PROBE COMPLETE"
+-echo "Every section above is deterministic and exhaustive for its pattern set."
+-echo "An empty section is a finding: '(none)' under CI/CD means there is no pipeline to audit."
+-echo "This probe locates; it does not conclude. Read each named file to its last line."
+-
+-exit 0
+diff -ruN a/.vvaharness/skills/crypto/SKILL.md b/.vvaharness/skills/crypto/SKILL.md
+--- a/.vvaharness/skills/crypto/SKILL.md	2026-10-27 12:15:24.021918244 +0000
++++ b/.vvaharness/skills/crypto/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,46 +0,0 @@
+----
+-name: "crypto"
+-description: "Find broken or misused cryptography: weak hashes and ciphers, unsalted password storage, predictable randomness, bad key or IV handling, disabled certificate verification."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Crypto Lens
+-
+-You are reviewing the cryptography, key-handling, and security-protocol
+-surfaces of this codebase. Target weaknesses an attacker can exploit
+-mathematically or by abusing protocol negotiation — not generic "uses MD5
+-somewhere" hygiene items.
+-mathematically or by abusing protocol negotiation — not generic "uses MD5
+-somewhere" hygiene items.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-- Secret/HMAC/token equality checks done with `==` / `equals` / `memcmp`
+-  instead of a constant-time comparator — early-exit leaks match length.
+-- Signature/JWT verification that reads the algorithm or key-id from the
+-  token itself and trusts it (alg=none, HS↔RS key confusion, kid path
+-  traversal).
+-- Symmetric encryption where the IV/nonce is constant, predictable, or
+-  derived from data the attacker can replay (GCM nonce reuse = full key
+-  compromise of authenticity).
+-- Security-relevant randomness drawn from non-CSPRNG sources
+-  (`Math.random`, `rand()`, `Random()`, `random.random`) for tokens, IVs,
+-  keys, OTPs, reset codes.
+-- TLS / signature verification that is wired up but not enforced — empty
+-  trust managers, hostname checks returning `true`, verify result ignored.
+-- Hard-coded keys, salts, or passphrases in source or config; key bytes
+-  written to logs or error messages.
+diff -ruN a/.vvaharness/skills/csrf/SKILL.md b/.vvaharness/skills/csrf/SKILL.md
+--- a/.vvaharness/skills/csrf/SKILL.md	2026-10-27 12:15:24.022022428 +0000
++++ b/.vvaharness/skills/csrf/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,102 +0,0 @@
+----
+-name: "csrf"
+-description: "Find state-changing requests that a third-party origin can forge: missing or unverified CSRF tokens, unsafe SameSite, and CORS that trusts a reflected Origin with credentials."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Csrf Lens
+-
+-You are a Cross-Site Request Forgery (CSRF) expert. Hunt for state-changing
+-endpoints that can be triggered by a forged cross-origin request — the attacker
+-model is a logged-in user visiting a malicious page that silently fires a
+-request to this application.
+-
+-HARD GATE — a finding requires ALL THREE:
+-  (a) an endpoint that performs a state change (write, delete, transfer, update
+-      password, change email, modify settings — NOT a read-only GET),
+-  (b) the endpoint authenticates via cookie or HTTP basic auth (stateful session),
+-      AND
+-  (c) there is no effective CSRF defence: no synchronizer token verified on this
+-      specific handler, no SameSite=Strict/Lax cookie attribute, no Origin/Referer
+-      check on this path, and no custom request header requirement.
+-If any one of (a)–(c) is absent, DROP the finding.
+-
+-EXPLICIT @csrf_exempt EXCEPTION — bypass condition (b):
+-If a handler is decorated with @csrf_exempt (Django), @csrf.exempt (Flask),
+-csrf.disable(), or skip_before_action :verify_authenticity_token (Rails), the
+-CSRF protection has been deliberately removed at the framework level. Report
+-EVERY such state-changing handler as a CSRF finding even when it currently
+-appears to be unauthenticated — the decorator is a standing removal of a
+-security control that applies the moment authentication is added or the
+-endpoint is reused in a context that has a session. Condition (b) is SATISFIED
+-by the explicit exemption decorator alone.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-
+-DJANGO / Python
+-- Views decorated with @csrf_exempt — any state-changing action on an
+-  exempt view is a confirmed CSRF if it uses session auth.
+-- Django: CsrfViewMiddleware absent from MIDDLEWARE in settings.py → global
+-  bypass; all state-changing views are vulnerable.
+-- State-changing GET handlers (any view that mutates DB/session on a GET
+-  request) bypass CSRF token checking entirely — Django's middleware only
+-  protects unsafe HTTP methods.
+-- Forms without {% csrf_token %} that POST to state-changing views.
+-- @require_POST not present: the same handler accepts GET, defeating token.
+-- AJAX endpoints that rely only on the session cookie and do not verify
+-  X-CSRFToken header or a body token.
+-
+-FLASK / Python
+-- Flask-WTF / flask_wtf.csrf not initialized (CSRFProtect not applied globally
+-  or per-blueprint), AND views accept POST with session auth.
+-- Blueprint or route decorated with @csrf.exempt for state-changing actions.
+-- Before-request CSRF check that is conditionally bypassed (request.method
+-  in ('GET','HEAD','OPTIONS','TRACE') check missing; non-safe methods not
+-  checked).
+-
+-EXPRESS / Node.js
+-- csurf middleware not applied to the router, or applied only to a subset of
+-  routes, leaving state-changing routes uncovered.
+-- SameSite not set to Strict or Lax on session cookie; no custom header check.
+-
+-SPRING MVC / Java
+-- CsrfConfigurer disabled: .csrf().disable() in security config.
+-- Spring Security's CSRF protection is enabled by default — look for explicit
+-  disablement or for request matchers that exclude state-changing paths.
+-- SameSite not set on session cookie AND no CSRF token checked.
+-
+-RAILS / Ruby
+-- protect_from_forgery :with => :null_session or :with => :exception bypassed,
+-  or skip_before_action :verify_authenticity_token on state-changing actions.
+-
+-CROSS-CUTTING
+-- Any state-changing JSON API that relies only on Content-Type: application/json
+-  without also checking a CSRF token or custom header — Flash-based or form-
+-  encoded cross-origin requests can set arbitrary Content-Type in some browsers.
+-- Logout endpoints without CSRF protection allow forced logout (session fixation
+-  compound attack).
+-- Password/email change endpoints are the highest-severity CSRF target — always
+-  check these specifically.
+-
+-ENUMERATION RULE (CRITICAL — do not skip)
+-When you find multiple handlers that are each independently CSRF-vulnerable
+-(e.g., multiple @csrf_exempt views, multiple routes lacking a CSRF token),
+-report EACH ONE as a SEPARATE finding with its own function name, file, and
+-line number. Do NOT collapse all instances into a single omnibus finding.
+-Every distinct state-changing endpoint without CSRF protection is an
+-independent vulnerability with its own exploitability and fix location.
+diff -ruN a/.vvaharness/skills/deserialization/SKILL.md b/.vvaharness/skills/deserialization/SKILL.md
+--- a/.vvaharness/skills/deserialization/SKILL.md	2026-10-27 12:15:24.022530246 +0000
++++ b/.vvaharness/skills/deserialization/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,51 +0,0 @@
+----
+-name: "deserialization"
+-description: "Find unsafe deserialization of untrusted data: pickle, yaml.load, native object streams, and type-confusable decoders that instantiate attacker-chosen classes."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Deserialization Lens
+-
+-You are an Unsafe-deserialization expert. Hunt for deserialization of
+-attacker-influenced bytes through libraries that invoke code during object
+-reconstruction — the dominant remote-code-execution vector on the JVM.
+-
+-HARD GATE — a finding requires BOTH:
+-  (a) a deserializer call site, AND
+-  (b) a path from untrusted input (HTTP body/header/param, message queue,
+-      file upload, cache, DB blob written by another tenant) to that call.
+-Deserializing your own freshly-serialized data, or data signed/HMAC'd before
+-serialize and verified before deserialize, is NOT a finding. Cite both
+-file:line points or drop it.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-- Java native: ObjectInputStream.readObject / readUnshared, Serializable +
+-  readObject/readResolve overrides, RMI/JMX/JNDI endpoints, Apache Commons
+-  SerializationUtils.
+-- Jackson: ObjectMapper with enableDefaultTyping / activateDefaultTyping,
+-  @JsonTypeInfo(use = Id.CLASS or Id.MINIMAL_CLASS), PolymorphicTypeValidator
+-  set to LaissezFaire, or polymorphic fields typed as Object/Serializable.
+-- XML: XMLDecoder, XStream without a hardened allow-list (fromXML on request
+-  data), JAXB with XmlAdapter that instantiates by class name.
+-- YAML: SnakeYAML new Yaml() / Yaml(new Constructor()) on untrusted input
+-  (allows !!javax.script… etc.); only SafeConstructor is safe.
+-- Others: Kryo, Hessian/Burlap, FST, Spring DefaultDeserializer,
+-  RedisTemplate with JdkSerializationRedisSerializer where Redis is shared.
+-- Mitigation check: is an ObjectInputFilter / serialFilter / class allow-list
+-  applied BEFORE readObject? If yes, evaluate whether the allow-list itself
+-  admits a known gadget (e.g. permits java.util.*, org.apache.commons.*).
+diff -ruN a/.vvaharness/skills/hardcoded-creds/SKILL.md b/.vvaharness/skills/hardcoded-creds/SKILL.md
+--- a/.vvaharness/skills/hardcoded-creds/SKILL.md	2026-10-27 12:15:24.022815313 +0000
++++ b/.vvaharness/skills/hardcoded-creds/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,76 +0,0 @@
+----
+-name: hardcoded-creds
+-description: Find credentials, keys, tokens and signing secrets committed in source, config, manifests or deployment files.
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Hardcoded Creds Lens
+-
+-You are a Hardcoded-Credentials expert. Hunt for secrets baked into source
+-code or checked-in configuration — the attacker model is anyone with read
+-access to the repository (developer, CI system, leaked archive).
+-
+-HARD GATE — a finding requires an ACTUAL VALUE committed to source, not a
+-reference to an environment variable. ${ENV_VAR}, os.environ.get('KEY'),
+-process.env.KEY, @Value("${...}") are NOT findings — they load from the
+-environment at runtime. Only report literal values that are directly usable.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-
+-SETTINGS / CONFIG FILES (highest yield — scan these first)
+-- Django settings.py: SECRET_KEY = '...literal...', DATABASES password literal,
+-  EMAIL_HOST_PASSWORD, AWS_SECRET_ACCESS_KEY, STRIPE_SECRET_KEY.
+-  Flag ALL literal values in security-sensitive keys, not just common names.
+-- Flask config.py / app.config: SECRET_KEY, SQLALCHEMY_DATABASE_URI with
+-  embedded password, JWT_SECRET_KEY, MAIL_PASSWORD.
+-- .env files committed to the repo (not in .gitignore): KEY=literal_value.
+-  Even sample .env files with real-looking secrets are findings.
+-- application.properties / application.yml (Spring): spring.datasource.password,
+-  spring.security.oauth2.client.secret, jwt.secret.
+-- config.yaml / config.json: any key named password, secret, token, api_key,
+-  private_key, access_key containing a non-placeholder string value.
+-
+-SOURCE CODE
+-- Hardcoded JWT signing secrets: jwt.encode(payload, "literal_secret", ...)
+-- Hardcoded API keys: requests.get(..., headers={"Authorization": "Bearer
+-  sk-literal..."}) or api_key = "literal"
+-- Hardcoded DB passwords: psycopg2.connect("...password=literal...")
+-- Hardcoded cryptographic keys: AES_KEY = b"0123456789abcdef"
+-- Hardcoded admin/default passwords in user-seeding or migration scripts.
+-- Test files with real credentials (test_*.py, *_test.go) — these get committed
+-  and are just as exploitable as production code.
+-- Passwords committed as comments: # password is 'literal' (for testing)
+-- In-function auth comparison checks: `if username == 'admin' and password ==
+-  'secret'` or `elif name=='jack' and password=='jacktheripper'` — literal
+-  values in equality comparisons inside view/handler/auth functions are just
+-  as dangerous as assignment patterns. Flag every hardcoded credential used
+-  in an authentication comparison, even if the variable name is not 'password'.
+-- In-memory user stores with hardcoded credentials: `users = {'admin':
+-  {'password': 'admin123'}}` — dict/map literals where the 'password' key
+-  holds a non-hashed string value. Includes Flask/Express in-memory user tables.
+-- Object attribute assignment: `app.secret_key = 'literal'`,
+-  `self.password = 'literal'` — attribute-style assignments to security-
+-  sensitive names are equivalent to variable assignments.
+-
+-SEVERITY RULES
+-- Signing keys / JWT secrets / crypto keys → CRITICAL (forgeable tokens, key material)
+-- DB connection passwords / cloud API keys → HIGH (data access / billing abuse)
+-- Internal service tokens / webhook secrets → HIGH
+-- Default / demo passwords shipped in seed data → MEDIUM
+-- Placeholder-looking values ("changeme", "TODO", "FIXME") → LOW (note only)
+-  unless the application appears to actually use them in production paths.
+diff -ruN a/.vvaharness/skills/iac/SKILL.md b/.vvaharness/skills/iac/SKILL.md
+--- a/.vvaharness/skills/iac/SKILL.md	2026-10-27 12:15:24.023094517 +0000
++++ b/.vvaharness/skills/iac/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,94 +0,0 @@
+----
+-name: "iac"
+-description: "Find infrastructure-as-code and deployment misconfiguration in Terraform, Dockerfiles, Kubernetes/Helm, compose, CloudFormation, Ansible, and CI pipelines: over-permissive IAM, exposed services, container escape, secrets in manifests, unpinned supply chain, disabled controls. Ships probe.sh, which inventories the platforms present and greps each one's known-bad directives."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Iac Lens
+-
+-Hunt misconfigurations that expose data, escalate privilege, or let an attacker
+-inject code into the build or deploy pipeline.
+-
+-HARD GATE — every finding MUST cite the specific resource block, step, or
+-directive (file:line) AND the security property it violates: least privilege,
+-network isolation, supply-chain integrity, or secret hygiene. A best-practice
+-item with no concrete attack path is LOW. Vendor-default settings that match
+-the platform baseline are NOT findings.
+-
+-## Probe first
+-
+-`sh .vvaharness/skills/iac/probe.sh [root]` — a MANIFEST INVENTORY naming which
+-platforms actually exist here, then labelled `file:line` sections of known-bad
+-directives per platform, plus cross-cutting TLS and credential literals.
+-
+-Read the inventory first. An absent platform is not a finding — do not report
+-Kubernetes hardening for a repo with no manifests.
+-
+-## Polarity: some sections are findings when EMPTY
+-
+-The probe lists presence for controls whose *absence* is the defect. Invert
+-these deliberately — `(none)` here is the finding, not a clean result:
+-
+-- **`every USER directive`** — no image drops root.
+-- **`securityContext` / `readOnlyRootFilesystem`** — containers run unconstrained.
+-- **`NetworkPolicy`** — flat pod network; one compromised pod reaches every service.
+-- **`audit / logging config`** — no trail exists to detect abuse.
+-- **`cross-account trust`** — hits *without* a matching `ExternalId` in the same
+-  policy are the confused-deputy case.
+-
+-## Judgement the grep cannot make
+-
+-- **CI trust boundary is a conjunction.** `pull_request_target` alone is fine.
+-  It is RCE with repo secrets only when the workflow *also* checks out the PR
+-  head ref *and* executes something from that checkout (install, build, test,
+-  lint). Verify all three in one workflow before reporting.
+-- **Event data is attacker-authored.** Issue and PR titles, branch names, commit
+-  messages, bodies. `${{ github.event.* }}` inside `run:` is shell injection;
+-  the same expression in an `if:`, or passed via `env:` and quoted, is not.
+-- **A `secrets.*` reference is not a finding.** Every workflow that deploys
+-  anything reads one, so `secrets reaching a step` is the sweep's
+-  highest-volume label. It becomes a finding on one of two conditions: the step
+-  it reaches executes untrusted code, or the secret is written into `env:` /
+-  `outputs` where a later step logs it. A secret passed straight to a
+-  SHA-pinned action is neither.
+-- **Self-hosted runners need both qualifiers.** The finding is a self-hosted
+-  runner on a **public** repo **without** per-job isolation (fresh VM or
+-  container per job) — a fork PR then runs on infrastructure that keeps state
+-  between jobs. On a private repo, or with ephemeral runners, `runs-on:
+-  self-hosted` is ordinary configuration.
+-- **GitLab `rules:` can route around approval.** A `rules:` / `only:` /
+-  `except:` clause that lets a deploy or release job run on a branch the
+-  approval gate does not cover is an authorization bypass, not a hygiene nit.
+-  Read which branches the gate protects before judging.
+-- **Ansible Vault is only as good as where the key lives.** `$ANSIBLE_VAULT;`
+-  material in the repo is correct practice — it is a credential exposure when
+-  the vault password or key file is committed alongside it, since anyone with
+-  the repo can then decrypt. Check both probe labels together.
+-- **Base-image pinning.** Judge each `FROM`: a digest is pinned, `:latest` or a
+-  bare name is not, a moving minor tag is a prod-only supply-chain risk.
+-- **Kubernetes `data:` is base64, not encryption.** Material under `data:` or
+-  `stringData:` is a committed secret; a sealed-secret or external-secrets
+-  reference is not.
+-- **Placeholders are not literals.** `${var}`, `{{ .Values.x }}`, `$(VAR)` in a
+-  credential position are indirection — but check the committed `values.yaml` /
+-  `*.tfvars` defaults they resolve to.
+-- **Environment decides severity.** A public bucket, or `0.0.0.0/0` on
+-  22/3389/3306/5432/6379/9200/27017, in prod is HIGH; a missing log-retention
+-  setting on a dev account is LOW.
+-
+-Give every finding a concrete remediation: the exact directive to add or remove.
+diff -ruN a/.vvaharness/skills/iac/probe.sh b/.vvaharness/skills/iac/probe.sh
+--- a/.vvaharness/skills/iac/probe.sh	2026-10-27 12:15:24.023377693 +0000
++++ b/.vvaharness/skills/iac/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,127 +0,0 @@
+-#!/bin/sh
+-# IaC misconfiguration sweep: inventories the manifest platforms present, then greps each one's known-bad directives.
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-ROOT="${1:-.}"
+-CAP=20
+-XD="--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=venv --exclude-dir=__pycache__ --exclude-dir=dist --exclude-dir=build --exclude-dir=.vvaharness --exclude-dir=vendor"
+-Q="['\"]"
+-
+-hits() {
+-	label=$1
+-	pat=$2
+-	shift 2
+-	printf '\n== %s ==\n' "$label"
+-	out=$(grep -rEni --binary-files=without-match $XD "$pat" "$@" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$out" ]; then
+-		echo "(none)"
+-	else
+-		printf '%s match(es); showing up to %s\n' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "$CAP"
+-		printf '%s\n' "$out" | head -n "$CAP"
+-	fi
+-}
+-
+-flist() {
+-	label=$1
+-	pat=$2
+-	shift 2
+-	printf '\n== %s ==\n' "$label"
+-	out=$(grep -rElI $XD "$pat" "$@" "$ROOT" 2>/dev/null | sort || true)
+-	if [ -z "$out" ]; then
+-		echo "(none)"
+-	else
+-		printf '%s file(s); showing up to %s\n' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "$CAP"
+-		printf '%s\n' "$out" | head -n "$CAP"
+-	fi
+-}
+-
+-nlist() {
+-	label=$1
+-	shift
+-	printf '\n== %s ==\n' "$label"
+-	out=$(find "$ROOT" \( -name .git -o -name node_modules -o -name vendor \) -prune -o \
+-		-type f \( "$@" \) -print 2>/dev/null | sort || true)
+-	if [ -z "$out" ]; then
+-		echo "(none)"
+-	else
+-		printf '%s file(s); showing up to %s\n' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "$CAP"
+-		printf '%s\n' "$out" | head -n "$CAP"
+-	fi
+-}
+-
+-echo "IAC MISCONFIGURATION SWEEP under: $ROOT"
+-echo "Candidates only. Cite file:line and the security property violated before reporting."
+-
+-printf '\n--- MANIFEST INVENTORY (an absent platform is not a finding) ---\n'
+-flist "Terraform / HCL" '.' --include='*.tf' --include='*.tfvars' --include='*.hcl'
+-flist "Dockerfile / Containerfile" '^[[:space:]]*FROM[[:space:]]' --include='Dockerfile*' --include='Containerfile*' --include='*.dockerfile' --include='*.Dockerfile'
+-flist "Kubernetes / Helm manifests" '^[[:space:]]*apiVersion[[:space:]]*:' --include='*.yaml' --include='*.yml' --include='*.tpl'
+-flist "docker-compose" '^[[:space:]]*services[[:space:]]*:' --include='*.yml' --include='*.yaml'
+-flist "CI pipelines" '^[[:space:]]*(jobs|stages|pipelines)[[:space:]]*:|runs-on|pipeline[[:space:]]*\{' --include='*.yml' --include='*.yaml' --include='Jenkinsfile*' --include='*.jenkinsfile' --include='*.groovy'
+-flist "CloudFormation / SAM" 'AWSTemplateFormatVersion|Type[[:space:]]*:[[:space:]]*AWS::' --include='*.yaml' --include='*.yml' --include='*.json' --include='*.template'
+-flist "Ansible" '^[[:space:]]*-?[[:space:]]*(hosts|tasks|roles)[[:space:]]*:' --include='*.yml' --include='*.yaml'
+-
+-printf '\n--- TERRAFORM / CLOUDFORMATION ---\n'
+-hits "wildcard IAM action / resource / principal" "(Action|Resource|Principal|actions|resources)$Q?[[:space:]]*[:=][[:space:]]*\[?[[:space:]]*$Q?\\*|:\\*$Q"
+-hits "open ingress (0.0.0.0/0, ::/0)" '0\.0\.0\.0/0|::/0'
+-hits "public buckets / instances" "acl[[:space:]]*=[[:space:]]*$Q(public-read|public-read-write|authenticated-read)|publicly_accessible[[:space:]]*=[[:space:]]*true|block_public_(acls|policy|access)[[:space:]]*=[[:space:]]*false|PublicAccessBlockConfiguration|AllUsers|AuthenticatedUsers"
+-hits "encryption off / absent" 'encrypted[[:space:]]*=[[:space:]]*false|storage_encrypted[[:space:]]*=[[:space:]]*false|server_side_encryption|enable_key_rotation[[:space:]]*=[[:space:]]*false|sse_algorithm'
+-hits "audit / logging config (absent = no trail)" 'cloudtrail|flow_log|access_logg?ing|enable_logging|logging_config'
+-hits "aws_ssm_parameter type (String leaks; want SecureString)" "aws_ssm_parameter|type[[:space:]]*=[[:space:]]*${Q}Secure?String"
+-hits "cross-account trust (check for ExternalId)" 'sts:AssumeRole|assume_role_policy|ExternalId'
+-
+-printf '\n--- DOCKERFILE ---\n'
+-DF="--include=Dockerfile* --include=Containerfile* --include=*.dockerfile --include=*.Dockerfile"
+-hits "every USER directive (no hits at all = runs as root)" '^[[:space:]]*USER[[:space:]]' $DF
+-hits "every FROM (judge tag pinning; :latest or bare = unpinned)" '^[[:space:]]*FROM[[:space:]]' $DF
+-hits "remote fetch piped to a shell / ADD from URL" '(curl|wget)[^|]*\|[[:space:]]*(ba|z|da)?sh|^[[:space:]]*ADD[[:space:]]+https?://' $DF
+-hits "secret-shaped ENV / ARG (baked into image layers)" '^[[:space:]]*(ENV|ARG)[[:space:]]+[A-Za-z_]*(PASS|SECRET|TOKEN|KEY|CRED|AUTH)' $DF
+-hits "COPY of the whole build context (.git, .env leak)" '^[[:space:]]*COPY[[:space:]]+\.[[:space:]]+' $DF
+-
+-printf '\n--- KUBERNETES / HELM / COMPOSE ---\n'
+-hits "privileged / privilege escalation / dangerous caps" 'privileged[[:space:]]*:[[:space:]]*true|allowPrivilegeEscalation[[:space:]]*:[[:space:]]*true|SYS_ADMIN|NET_ADMIN|NET_RAW|SYS_PTRACE|cap_add'
+-hits "runs as root" 'runAsUser[[:space:]]*:[[:space:]]*0|runAsNonRoot[[:space:]]*:[[:space:]]*false|runAsRoot|user[[:space:]]*:[[:space:]]*.?root'
+-hits "securityContext / readOnlyRootFilesystem (absent = unconstrained)" 'securityContext|readOnlyRootFilesystem'
+-hits "host namespace or host mount (escape path)" "hostNetwork|hostPID|hostIPC|hostPath|network_mode[[:space:]]*:[[:space:]]*$Q?host|pid[[:space:]]*:[[:space:]]*$Q?host|docker\\.sock|:[[:space:]]*/(proc|sys|etc|var/run)"
+-hits "plaintext secret material in a manifest" "kind[[:space:]]*:[[:space:]]*Secret|stringData|[A-Za-z_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)[[:space:]]*:[[:space:]]*[^\$\\{[:space:]]"
+-hits "wildcard RBAC / cluster-admin" "cluster-admin|(resources|verbs|apiGroups)[[:space:]]*:[[:space:]]*\[?[[:space:]]*$Q?\\*|ClusterRoleBinding"
+-hits "internet-facing service type" 'type[[:space:]]*:[[:space:]]*(LoadBalancer|NodePort)'
+-hits "NetworkPolicy (absent = flat pod network)" 'kind[[:space:]]*:[[:space:]]*NetworkPolicy'
+-
+-printf '\n--- CI / PIPELINE ---\n'
+-hits "pull_request_target / workflow_run (trusted context)" 'pull_request_target|workflow_run'
+-hits "untrusted event data interpolated into a step" '\$\{\{[[:space:]]*github\.event'
+-hits "third-party action pinned by mutable ref, not SHA" 'uses[[:space:]]*:[[:space:]]*[^[:space:]@]+@(v?[0-9][0-9a-z.-]*|main|master|latest|HEAD)[[:space:]]*$'
+-hits "secrets reaching a step" 'secrets\.[A-Z_]'
+-hits "self-hosted runner" 'runs-on[[:space:]]*:[[:space:]]*\[?[[:space:]]*.?self-hosted'
+-hits "shell interpolation in Jenkins / unpinned GitLab include" "(sh|bat)[[:space:]]+$Q[^$Q]*\\\$\\{|include[[:space:]]*:|remote[[:space:]]*:[[:space:]]*https?://"
+-
+-GL="--include=.gitlab-ci.yml --include=*.gitlab-ci*.yml"
+-hits "GitLab job rules, which may skip the branch the approval gate covers" '^[[:space:]]*(rules|only|except)[[:space:]]*:' $GL
+-
+-printf '\n--- ANSIBLE ---\n'
+-hits "shell/command with a templated variable" '(shell|command|raw)[[:space:]]*:.*\{\{'
+-hits "become / no_log" 'become[[:space:]]*:[[:space:]]*(yes|true)|no_log[[:space:]]*:[[:space:]]*(no|false)'
+-hits "vault-encrypted material" '\$ANSIBLE_VAULT;'
+-nlist "vault password / key file committed beside it" -name '*vault*pass*' -o -name '*vault*key*' -o -name '.vault_pass*'
+-
+-printf '\n--- CROSS-CUTTING ---\n'
+-hits "TLS verification disabled" 'insecure_skip_verify|validate_certs[[:space:]]*:[[:space:]]*(no|false)|GIT_SSL_NO_VERIFY|NODE_TLS_REJECT_UNAUTHORIZED[[:space:]]*[:=][[:space:]]*.?0|sslverify[[:space:]]*[:=][[:space:]]*(false|0)|(curl|wget)[^|]*(--insecure|--no-check-certificate|[[:space:]]-k[[:space:]])'
+-hits "literal credential / connection string" "(access_key|secret_key|password|passwd|api_?key|auth_?token|private_key|connection_?string)[[:space:]]*[:=][[:space:]]*$Q[^$Q\$\\{][^$Q]{5,}"
+-hits "sample / default credentials" "(admin|root|changeme|letmein|password|secret|123456|postgres|guest)[[:space:]]*[:=][[:space:]]*$Q?(admin|root|changeme|letmein|password|secret|123456|postgres|guest)$Q?[[:space:]]*$"
+-
+-printf '\n(end of sweep)\n'
+-exit 0
+diff -ruN a/.vvaharness/skills/injection/SKILL.md b/.vvaharness/skills/injection/SKILL.md
+--- a/.vvaharness/skills/injection/SKILL.md	2026-10-27 12:15:24.023696576 +0000
++++ b/.vvaharness/skills/injection/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,76 +0,0 @@
+----
+-name: injection
+-description: "Hunt injection classes (SQL, NoSQL, OS command, LDAP, XPath, XXE, CRLF, SSTI, open redirect, path traversal, SSRF, server-emitted XSS, ReDoS) under a source/sink/no-defence hard gate. Ships probe.sh: a per-class sink sweep plus a census of the defences present."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Injection Lens
+-
+-Find where attacker-controlled input is merged into a downstream interpreter
+-without separating code from data, across every class named in this skill's
+-description.
+-
+-HARD GATE — a finding requires ALL THREE:
+-  (a) a SINK that interprets its input — SQL executor, shell exec, XML parser,
+-      HTTP client, response writer, file open, regex compile, template render,
+-      redirect, header setter,
+-  (b) a SOURCE reachable from an external actor — request field, message body,
+-      file upload, CLI arg, env var, or a DB row previously written by an
+-      untrusted party (second-order),
+-  (c) NO intervening defence: no parameterisation, no allow-list, no
+-      context-correct escaper, no library-provided safe wrapper.
+-If (a)'s argument is a hardcoded literal, or nothing reaches the sink on any
+-path, DROP it. "We should validate this" with no sink is not a finding here.
+-
+-## Probe first
+-
+-`sh .vvaharness/skills/injection/probe.sh [root]` — a labelled `file:line`
+-section of sink hits per class, then a DEFENCE CENSUS counting the files that
+-carry each defence. Every line is a CANDIDATE; `(none)` is a real answer, so
+-stop working that class. The sections are a starting set, not the lens.
+-
+-## What refutes a candidate
+-
+-- **Literal argument.** Constant, column name from a fixed tuple, internal enum.
+-- **Defence in the wrong context.** HTML-escaping a value bound for JS or an
+-  attribute; `shlex.quote` on the binary but not its args; an allow-list on a
+-  different variable than the one reaching the sink; `%s` inside the query
+-  string (interpolation) read as `%s` with a params tuple (binding).
+-- **Parse-check-use mismatch.** The reverse, and a finding: code parses the URL
+-  or path to check host/prefix, then builds the request or `open()` from the
+-  raw string.
+-- **Second-order flow.** Taint entered on an earlier write — DB row, cache,
+-  config — later concatenated into a query. The call site looks clean; only
+-  tracing the write reveals it.
+-- **XXE flags.** A parser factory is vulnerable only if `disallow-doctype-decl`
+-  / `FEATURE_SECURE_PROCESSING` / `resolve_entities=False` is absent. The probe
+-  finds the factory; you check the flag.
+-- **SSRF allow-list that still permits metadata** — `169.254.169.254`,
+-  `metadata.google.internal`, `metadata.azure.com`.
+-- **ReDoS input size.** Catastrophic patterns matter against unbounded input;
+-  on a length-capped field, LOW.
+-- **Zip-Slip.** `extractall` counts only with unvalidated member names on an
+-  attacker-supplied archive.
+-
+-## ENUMERATION RULE (CRITICAL — do not skip)
+-
+-Every distinct sink is its own finding, with its own class (SQLi / CMDi /
+-SSRF / …), file, line, source, and sink. Three raw SQL builders across two
+-files are three findings; one SSRF plus one path traversal in one handler are
+-two. Never collapse them into an omnibus "input validation missing" — each sink
+-has its own exploitability and its own fix location.
+diff -ruN a/.vvaharness/skills/injection/probe.sh b/.vvaharness/skills/injection/probe.sh
+--- a/.vvaharness/skills/injection/probe.sh	2026-10-27 12:15:24.023924428 +0000
++++ b/.vvaharness/skills/injection/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,92 +0,0 @@
+-#!/bin/sh
+-# Injection candidate sweep: one labelled section per injection class, plus a defence census.
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-ROOT="${1:-.}"
+-CAP=20
+-XD="--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=venv --exclude-dir=__pycache__ --exclude-dir=dist --exclude-dir=build --exclude-dir=.vvaharness --exclude-dir=vendor"
+-
+-hits() {
+-	label=$1
+-	pat=$2
+-	shift 2
+-	printf '\n== %s ==\n' "$label"
+-	out=$(grep -rEn --binary-files=without-match $XD "$pat" "$@" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$out" ]; then
+-		echo "(none)"
+-	else
+-		printf '%s match(es); showing up to %s\n' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "$CAP"
+-		printf '%s\n' "$out" | head -n "$CAP"
+-	fi
+-}
+-
+-count() {
+-	printf '%-42s ' "$1"
+-	shift
+-	grep -rEl --binary-files=without-match $XD "$1" "$ROOT" 2>/dev/null | wc -l | tr -d ' '
+-}
+-
+-echo "INJECTION CANDIDATE SWEEP under: $ROOT"
+-echo "Every line below is a CANDIDATE. Apply the hard gate before reporting anything."
+-
+-hits "SQL text with interpolation or concatenation" \
+-	'(SELECT|INSERT[[:space:]]+INTO|UPDATE|DELETE[[:space:]]+FROM)[^;]*(\+|%s|%d|\.format\(|\{[A-Za-z_])'
+-hits "execute/query/raw on a non-literal argument" \
+-	'\.(execute|executemany|executeQuery|executeUpdate|query|raw|queryRaw)[[:space:]]*\(([A-Za-z_]|f["'"'"'])'
+-hits "ORM raw-query escape hatches" \
+-	'\.(extra|raw)\(|[^A-Za-z_]text\(|createNativeQuery|\$queryRaw|\$executeRaw|where\([^)]*#\{'
+-hits "NoSQL operator / server-side JS" \
+-	'\$where|\$function|\$accumulator|mapReduce\(|\.aggregate\('
+-hits "OS command execution" \
+-	'os\.system|os\.popen|shell[[:space:]]*=[[:space:]]*True|subprocess\.(run|call|Popen|check_output)|Runtime\.getRuntime\(\)\.exec|ProcessBuilder|child_process|execSync|spawnSync|Kernel\.(system|exec)|%x\{|qx[({/#|]|(open|system|exec)[[:space:]]*\([[:space:]]*['"'"'"]?[^)]*\|'
+-# Backticks mean command execution only in Ruby / Perl / shell; in JS/TS they are template
+-# literals and in Markdown inline code, so this alternative is confined to those file types.
+-hits "backtick command execution with interpolation (Ruby / Perl / shell)" \
+-	'`[^`]*(\$\{?[A-Za-z_@]|#\{)[^`]*`' \
+-	--include='*.rb' --include='*.pl' --include='*.pm' --include='*.sh' --include='*.bash' --include='Rakefile'
+-hits "dynamic code evaluation" \
+-	'[^A-Za-z_](eval|exec)\(|new Function\(|Function\([^)]*\)[[:space:]]*\(|set(Timeout|Interval)\([[:space:]]*["'"'"']|__import__\(|pickle\.loads|yaml\.load\('
+-hits "LDAP / XPath queries" \
+-	'DirContext|InitialLdapContext|ldap3|python-ldap|\.search_s?\(|XPathExpression|selectSingleNode|selectNodes|\.xpath\('
+-hits "XML parser factories (check hardening flags yourself)" \
+-	'DocumentBuilderFactory|SAXParserFactory|XMLInputFactory|TransformerFactory|SAXReader|XmlPullParser|etree\.(parse|fromstring|XMLParser)|xml\.dom\.minidom|expatreader|XmlDocument'
+-hits "outbound HTTP clients (SSRF sinks)" \
+-	'requests\.(get|post|put|delete|head|request)|urlopen|urllib[0-9]?\.|http\.client|HttpURLConnection|OkHttpClient|HttpClient|WebClient|RestTemplate|Net::HTTP|axios\.|[^A-Za-z_]fetch\('
+-hits "filesystem open / archive extraction" \
+-	'[^A-Za-z_.]open\([^)]*(\+|%s|\.format\(|f["'"'"'])|os\.path\.join\(|fs\.(read|write|create)File|new File\(|Path(s)?\.(of|get)\(|extractall|\.extract\(|TarFile|ZipFile|send_file|sendFile|static_file'
+-hits "template autoescape bypass (server-emitted XSS)" \
+-	'\|[[:space:]]*safe|autoescape[[:space:]]*=[[:space:]]*False|mark_safe|html_safe|[^A-Za-z_]raw\(|\{\{\{|dangerouslySetInnerHTML|innerHTML[[:space:]]*='
+-hits "SSTI — input rendered AS a template" \
+-	'render_template_string|Template[[:space:]]*\(|new SimpleTemplateEngine|ERB\.new|Velocity\.evaluate|Jinja2?\(|from_string\('
+-hits "redirect writers (open redirect)" \
+-	'redirect\([^)]*(request|req|params|query|next|url|returnUrl)|res\.redirect\(|sendRedirect\(|Response\.Redirect|redirect_to[[:space:]]'
+-hits "response header / cookie writes (CRLF)" \
+-	'headers?\[[^]]*\][[:space:]]*=|setHeader\(|add_header\(|set_cookie\(|addCookie\(|Set-Cookie'
+-hits "regex compiled from a variable" \
+-	'(re\.compile|Pattern\.compile|new RegExp|Regexp\.new|regexp\.MustCompile)\([[:space:]]*[A-Za-z_][A-Za-z_0-9.]*[[:space:]]*[,)]'
+-hits "nested-quantifier regex literals (ReDoS)" \
+-	'\([^)]*[*+][^)]*\)[*+]|\([^|)]+\|[^|)]+\)[*+][^?]'
+-
+-printf '\n== DEFENCE CENSUS (files containing each marker) ==\n'
+-count "parameter placeholders (?, :name, \$1)" '(execute|query)\([^)]*(\?|:[a-z_]+|\$[0-9])'
+-count "shlex.quote / escapeshellarg / Shellwords" 'shlex\.quote|escapeshellarg|Shellwords|quote_plus'
+-count "allow-list vocabulary" '(allow|white)_?list|ALLOW(ED)?_(HOSTS|SCHEMES|ORIGINS)|in[[:space:]]+\{?["'"'"']'
+-count "context escapers" 'escape\(|html\.escape|escapeHtml|quote_ident|urlencode|encodeURIComponent'
+-count "XXE hardening flags" 'disallow-doctype-decl|FEATURE_SECURE_PROCESSING|external-general-entities|resolve_entities|no_network'
+-count "canonical-path checks" 'realpath|resolve\(\)|abspath|normpath|Canonical'
+-
+-printf '\n(end of sweep)\n'
+-exit 0
+diff -ruN a/.vvaharness/skills/log-injection/SKILL.md b/.vvaharness/skills/log-injection/SKILL.md
+--- a/.vvaharness/skills/log-injection/SKILL.md	2026-10-27 12:15:24.024022508 +0000
++++ b/.vvaharness/skills/log-injection/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,81 +0,0 @@
+----
+-name: "log-injection"
+-description: "Find unsanitised input reaching log sinks: forged log records, injected control characters, and sensitive values written to logs."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Log Injection Lens
+-
+-You are a Log-Injection / Insufficient-Logging expert. Hunt for two distinct
+-classes:
+-
+-CLASS A — Log Injection (CWE-117): attacker-controlled data written to logs
+-without sanitisation allows forged log entries, log poisoning, or downstream
+-log-parser exploitation.
+-
+-CLASS B — Missing / Insufficient Logging (CWE-778, OWASP A09): security-
+-relevant events not logged at all — silent authentication failures, privilege
+-changes, admin actions — which blind incident responders.
+-
+-CLASS A HARD GATE — requires BOTH:
+-  (a) a log call (logging.*, logger.*, console.log, System.out.println,
+-      log4j, logback, sentry, etc.) AND
+-  (b) a value in the log message that originates from external/attacker input
+-      (request body, query param, header, uploaded filename, user-supplied field)
+-      WITHOUT stripping newlines (\n, \r, %0a, %0d) before logging.
+-Logging of sanitised or fixed strings is NOT a finding.
+-
+-CLASS C — Plaintext Credentials in Logs (CWE-312 / CWE-532): a log call that
+-records a password, secret, token, or private key value — regardless of whether
+-log injection is possible. This is a finding on its own even if the logged value
+-cannot be weaponised for log injection.
+-Examples: `L.info(f"POST request with username {username} and password
+-{password}")`, `logger.debug("auth token: %s", token)`, `print(f"secret={key}")`.
+-HARD GATE: log call includes a parameter whose name is password / passwd /
+-secret / token / api_key / private_key / auth_token (case-insensitive), OR
+-the string literal in the log message contains those keywords followed by the
+-variable value.
+-
+-CLASS B HARD GATE — requires an identifiable security event that produces
+-zero log output on failure: a login function with no logging on incorrect
+-password, an admin action with no audit trail, a permission-denied path with
+-no record.
+-
+-Where to look first (non-exhaustive — reason beyond this list):
+-
+-LOG INJECTION
+-- logging.info("User %s logged in", request.form['username']) — if the
+-  username contains \n it injects a new log line.
+-- logger.warning(f"Invalid input: {user_data}") — f-string with raw input.
+-- Any logging call where the format string or arguments include an HTTP
+-  parameter, header value, uploaded filename, or user profile field.
+-- Log rotation targets: if a logger writes to a file whose path is user-
+-  influenced, the attacker can write to arbitrary files (log4shell-class).
+-- Structured loggers (structlog, winston, bunyan): if an attacker-controlled
+-  key or value is merged into the event dict without sanitisation it can
+-  override log levels, timestamps, or inject arbitrary fields.
+-
+-MISSING LOGGING
+-- Authentication: failed login with wrong password, locked account, expired
+-  session — if none of these produce a log entry, brute-force is invisible.
+-- Admin actions (user role change, account deletion, config update) with no
+-  audit log.
+-- Security exceptions (PermissionDenied, AccessDenied, AuthenticationError)
+-  caught and swallowed silently (bare except: pass, except Exception: continue).
+-- Password reset / MFA enrolment / 2FA bypass events not logged.
+-- File upload or download of sensitive files not logged.
+diff -ruN a/.vvaharness/skills/logic-bug/SKILL.md b/.vvaharness/skills/logic-bug/SKILL.md
+--- a/.vvaharness/skills/logic-bug/SKILL.md	2026-10-27 12:15:24.024540437 +0000
++++ b/.vvaharness/skills/logic-bug/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,54 +0,0 @@
+----
+-name: "logic-bug"
+-description: "Find business-logic defects: missing validation on amounts and quantities, race conditions and TOCTOU, workflow steps that can be skipped or replayed."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Logic Bug Lens
+-
+-You are reviewing for behavioural / state-machine defects — the class of bug
+-that has no single grep signature and only surfaces when you reason about
+-ordering, concurrency, and edge-case inputs.
+-
+-HARD GATE — for every finding you MUST cite the exact trust boundary that is
+-crossed: the file:line where untrusted/external input enters, and the file:line
+-where the security decision is made on that input. If both sides are internal
+-(service-to-service, same trust domain, idempotent retry, intentional design),
+-DROP the finding. No trust-boundary citation → no finding.
+-
+-Reason about behaviour, don't pattern-match. Seed questions:
+-- Check-then-act windows: between the permission/ownership/balance check and
+-  the mutation, can a second request, another thread, or a filesystem actor
+-  change what was checked?
+-- Auth/session state: what does the login or step-up flow do on empty, null,
+-  duplicated, or out-of-order messages? Can two concurrent requests against
+-  one session leave it half-authenticated?
+-- Numeric identity and counters: what happens at overflow, at zero, at
+-  negative after a narrowing cast? Does an ID truncated to 32-bit collide
+-  with a privileged record?
+-- Connection/protocol state: can a malformed or truncated message leave the
+-  parser mid-state so the NEXT request on the same connection is
+-  misinterpreted?
+-- Caches and memoised decisions: is the cache key missing the
+-  tenant/user/role dimension, so one principal's result is served to
+-  another? Does a cached "authorised" decision outlive a revocation?
+-- Sentinel return values: is the result of indexOf/find/search (which returns
+-  -1 / null when the token is absent) used as an offset or length WITHOUT the
+-  `== -1` guard, so "not found" silently becomes position 0 or a wrong
+-  substring slice? Same for parseInt→NaN or a lookup returning null treated as
+-  success.
+diff -ruN a/.vvaharness/skills/missing-controls/SKILL.md b/.vvaharness/skills/missing-controls/SKILL.md
+--- a/.vvaharness/skills/missing-controls/SKILL.md	2026-10-27 12:15:24.024859275 +0000
++++ b/.vvaharness/skills/missing-controls/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,146 +0,0 @@
+----
+-name: missing-controls
+-description: Find weaknesses that consist of an ABSENT control — no rate limit, no session invalidation, no cookie flags, debug left on, secrets or PII stored in cleartext — by enumerating every site the control belongs and checking each.
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Absent-Control Lens
+-
+-Every other lens hunts for a dangerous **construct** — a sink, a concatenation, a weak
+-algorithm. This lens hunts for a **hole**. You cannot grep for a decorator that was never
+-written, and a deterministic scanner will never hand you a line number for it, so nothing
+-upstream will point you at these. If you only investigate what you were shown, you will
+-never report one.
+-
+-The method is inverted. Instead of "is this construct dangerous?", ask **"what should be
+-here, and is it?"** That requires enumerating sites first and judging second.
+-
+-## Hard gate — a finding requires all three
+-
+-1. **The site is real and reachable.** A concrete handler, route, cookie write, session
+-   config, or storage write that an external actor can reach. Not a hypothetical.
+-2. **The control genuinely belongs there.** Name the asset it would protect and the actor
+-   it would stop. "Every endpoint should have rate limiting" is not analysis; "`/api/login`
+-   accepts unlimited password guesses against a user-supplied username" is.
+-3. **It is absent on THIS path**, and you checked — not merely "not visible in the file you
+-   were given". Middleware, a base class, a decorator factory, a reverse-proxy config, or a
+-   framework default can supply it somewhere you have not looked yet. Look, then conclude.
+-
+-If the control exists anywhere on the path, **refute** and say where it is. A refutation
+-here is a real result: it is how the FP rate stays low.
+-
+-## Enumerate before you conclude
+-
+-These are systemic gaps, and a systemic gap is only actionable if the site list is
+-complete. Reporting one unprotected route while four others are equally exposed means
+-whoever applies your fix still ships the vulnerability.
+-
+-So for each control below: **Grep the whole repository for every site of the kind it
+-protects, then decide site by site.** Report one finding per absent site, each with its own
+-file and line. If it is present everywhere you enumerated, refute and say how many sites
+-you checked.
+-
+-## The controls, and where each belongs
+-
+-### Anti-automation on credential and cost endpoints — CWE-307, CWE-799
+-**Sites:** every handler that verifies a credential or consumes a scarce resource — login,
+-registration, password reset, OTP/MFA verification, token refresh, email send, payment,
+-file upload, expensive search.
+-**Present looks like:** `flask-limiter` `@limiter.limit(...)`; `django-ratelimit`
+-`@ratelimit`; DRF throttle classes; `slowapi` on FastAPI; `express-rate-limit`; Spring
+-`Bucket4j`; a failed-attempt counter with lockout persisted per account **or** per source;
+-a CAPTCHA gate; an upstream WAF/gateway rule **only if you can see it in this repo**.
+-**Note:** a `LoginAttempt` model or a `failed_count` column existing is not the control —
+-find the code that *reads* it and *refuses*. Storage without enforcement is a decoy.
+-
+-### Session termination — CWE-613, CWE-384
+-**Sites:** logout, password change, email change, role change, account deactivation.
+-**Present looks like:** server-side session destroy (`session.clear()`,
+-`request.session.flush()`, store delete); for stateless JWT a denylist/`jti` revocation
+-check, or a `token_version`/`password_changed_at` claim compared on every request.
+-**The classic hole:** a logout endpoint that returns `200 {"message": "logged out"}` and
+-nothing else, while the issued JWT stays valid until expiry — the token is still a working
+-credential. Also: a password change that does not invalidate other live sessions, and a
+-session with no absolute or idle lifetime at all.
+-
+-### Cookie and transport flags — CWE-614, CWE-1004, CWE-1275, CWE-319
+-**Sites:** every `set_cookie` / `Set-Cookie` write **and** every framework session config
+-key. There are usually more of these than you expect; grep for all of them.
+-**Present looks like:** `httponly=True`, `secure=True`, `samesite="Lax"` or `"Strict"` on
+-each write; `SESSION_COOKIE_HTTPONLY` / `_SECURE` / `_SAMESITE`; Django
+-`SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`.
+-**Report per site.** A config-level default does not cover an explicit `set_cookie` that
+-overrides it, and fixing the config does not fix the explicit writes.
+-
+-### Deployment and debug posture — CWE-16, CWE-215, CWE-489
+-**Sites:** app entrypoints, settings modules, Dockerfiles, compose files, CI/CD manifests.
+-**The holes:** `app.run(debug=True)` — the Werkzeug console is remote code execution, and
+-`host="0.0.0.0"` makes it reachable; Django `DEBUG = True`; `ALLOWED_HOSTS = ["*"]`;
+-stack traces or exception detail returned to the client; verbose error handlers;
+-directory listing; admin or metrics endpoints exposed without auth; default credentials
+-left in a seed or fixture.
+-**On CWE choice:** report the class your evidence supports. If debug mode yields arbitrary
+-code execution, that is what it yields — say so, and name the misconfiguration as the
+-cause in your description so both readings are recoverable.
+-
+-### Data at rest and in transit — CWE-312, CWE-311, CWE-319, CWE-359
+-**Sites:** model/schema definitions, migrations, seed and fixture data, serializers,
+-cache and queue writes, log statements, backup and export paths.
+-**The holes:** identifiers and PII (national ID, DOB, full address, card data, health
+-data) stored as plain columns or plain JSON blobs; a seed/fixture that commits real-looking
+-sensitive values; secrets written to a cache or queue unencrypted; TLS verification
+-disabled on an outbound call (`verify=False`, `rejectUnauthorized: false`).
+-**Distinguish:** stored-in-cleartext (CWE-312) is a different finding from
+-returned-in-a-response (CWE-359/200) even for the same field. If both hold, both are
+-findings — they have different fixes and different blast radii.
+-
+-### Request forgery and origin trust — CWE-352, CWE-942, CWE-1021
+-Covered in depth by the `csrf` lens; treat it as part of this sweep when the claim is that
+-a *protection is missing* rather than that a sink is dangerous. **Enumerate every
+-state-changing handler**, not just the one you were pointed at.
+-
+-### Authorization
+-Covered by the `access-control` lens, which already frames it as an absence. Note its
+-"where to look" examples are Spring/JAX-RS; translate to the framework in front of you —
+-Flask `@login_required` / `before_request`, Django permission classes and mixins, FastAPI
+-`Depends(...)`, Express middleware.
+-
+-## False-positive discipline
+-
+-Refute, do not report, when:
+-
+-- The control is present anywhere on the path, including in middleware, a base class, a
+-  dependency, a decorator applied at the blueprint/router level, or a framework default
+-  you can point to.
+-- The endpoint is genuinely public and unauthenticated by design (health check, static
+-  asset, public docs, webhook with signature verification present) and holds no scarce
+-  resource.
+-- The "sensitive" data is obviously synthetic test fixture data **and** the file is not
+-  shipped or seeded into a running environment. If it *is* seeded, it is a finding.
+-- The target is a fixed constant rather than attacker-varied — bounded blast radius, do
+-  not inflate it.
+-
+-Say which of these you checked. An absence claim with no stated search is indistinguishable
+-from a guess, and the reader cannot tell them apart.
+-
+-## What good output looks like
+-
+-One finding per absent site, each naming the file and the line the fix must edit — the
+-handler signature or decorator line for a missing guard, the `set_cookie` call for a
+-missing flag, the settings line for a posture problem. The rationale states what you
+-enumerated, how many sites you found, which had the control and which did not.
+diff -ruN a/.vvaharness/skills/missing-controls/probe.sh b/.vvaharness/skills/missing-controls/probe.sh
+--- a/.vvaharness/skills/missing-controls/probe.sh	2026-10-27 12:15:24.025123767 +0000
++++ b/.vvaharness/skills/missing-controls/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,163 +0,0 @@
+-#!/bin/sh
+-# Absent-control probe: enumerates every site a control belongs (routes, cookie writes, storage,
+-# config) and every place the control is actually present, so absence can be proven per site.
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-set -f
+-ROOT=${1:-.}
+-CAP=${MC_PROBE_CAP:-12}
+-WIDTH=140
+-EX="--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=venv
+---exclude-dir=.tox --exclude-dir=dist --exclude-dir=build --exclude-dir=__pycache__
+---exclude-dir=site-packages --exclude-dir=.mypy_cache --exclude-dir=target
+---exclude-dir=.next --exclude-dir=coverage
+---exclude-dir=.vvaharness --exclude-dir=security-scan --exclude=SKILL.md --exclude=probe.sh"
+-
+-# scan LABEL "INCLUDE_GLOBS" "ERE" — capped path:line hits, or (none).
+-scan() {
+-	_label=$1
+-	_globs=$2
+-	_pat=$3
+-	_inc=
+-	for _g in $_globs; do _inc="$_inc --include=$_g"; done
+-	echo "== $_label =="
+-	_out=$(grep -rEn --binary-files=without-match $_inc $EX -- "$_pat" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$_out" ]; then
+-		echo "(none)"
+-	else
+-		_n=$(printf '%s\n' "$_out" | wc -l | tr -d ' ')
+-		printf '%s\n' "$_out" | head -n "$CAP" | cut -c1-$WIDTH
+-		[ "$_n" -gt "$CAP" ] && echo "... $_n hits total, showing $CAP - grep this pattern yourself for the rest"
+-	fi
+-	echo ""
+-}
+-
+-# scan2 LABEL "INCLUDE_GLOBS" "ERE" "ERE2" — hits matching both patterns (site AND keyword).
+-scan2() {
+-	_label=$1
+-	_globs=$2
+-	_pat=$3
+-	_pat2=$4
+-	_inc=
+-	for _g in $_globs; do _inc="$_inc --include=$_g"; done
+-	echo "== $_label =="
+-	_out=$(grep -rEn --binary-files=without-match $_inc $EX -- "$_pat" "$ROOT" 2>/dev/null |
+-		grep -iE -- "$_pat2" || true)
+-	if [ -z "$_out" ]; then
+-		echo "(none)"
+-	else
+-		_n=$(printf '%s\n' "$_out" | wc -l | tr -d ' ')
+-		printf '%s\n' "$_out" | head -n "$CAP" | cut -c1-$WIDTH
+-		[ "$_n" -gt "$CAP" ] && echo "... $_n hits total, showing $CAP - grep this pattern yourself for the rest"
+-	fi
+-	echo ""
+-}
+-
+-# files LABEL "INCLUDE_GLOBS" "ERE" — file names only (existence is the answer, not the lines).
+-files() {
+-	_label=$1
+-	_globs=$2
+-	_pat=$3
+-	_inc=
+-	for _g in $_globs; do _inc="$_inc --include=$_g"; done
+-	echo "== $_label =="
+-	_out=$(grep -rlE --binary-files=without-match $_inc $EX -- "$_pat" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$_out" ]; then
+-		echo "(none)"
+-	else
+-		_n=$(printf '%s\n' "$_out" | wc -l | tr -d ' ')
+-		printf '%s\n' "$_out" | head -n 15
+-		[ "$_n" -gt 15 ] && echo "... $_n files total, showing 15"
+-	fi
+-	echo ""
+-}
+-
+-ROUTE='@[a-zA-Z_.]*\.(route|get|post|put|patch|delete)\(|@(Get|Post|Put|Patch|Delete|Request)Mapping|(app|router|api|server)\.(get|post|put|patch|delete|all)\(|path\(|re_path\(|url\(|def (get|post|put|patch|delete)\(|\[Http(Get|Post|Put|Delete)\]'
+-SENSITIVE='ssn|social_security|national_id|tax_id|passport|dob|date_of_birth|birth|card_number|cardnum|pan\b|cvv|cvc|iban|routing|account_number|salary|income|health|diagnosis|medical|insurance|address|phone|mobile|email|api_key|apikey|secret|token|password|passwd|pin\b|license'
+-
+-echo "### MISSING-CONTROLS PROBE root=$ROOT"
+-echo ""
+-
+-CAP=15
+-echo "--- SITES: enumerate these, then judge each ---"
+-echo ""
+-
+-scan "ALL ROUTE/HANDLER SITES (total count is your enumeration denominator)" "" "$ROUTE"
+-
+-scan2 "CREDENTIAL AND COST ENDPOINTS (rate-limit sites)" "" "$ROUTE" \
+-	'login|signin|sign_in|logout|signout|register|signup|sign_up|password|reset|forgot|otp|mfa|2fa|verify|token|refresh|confirm|invite|upload|import|export|search|send|mail|sms|pay|charge|checkout|transfer|withdraw'
+-
+-scan2 "STATE-CHANGING HANDLERS (CSRF / authz enumeration sites)" "" "$ROUTE" \
+-	'post|put|patch|delete|create|update|edit|save|add|remove|transfer|change|reset'
+-
+-scan "COOKIE WRITE SITES (one finding per write; config default does not cover these)" "" \
+-	'set_cookie|Set-Cookie|res\.cookie|response\.cookies|addCookie|new Cookie\(|HttpCookie|cookies\.set|\.cookie\s*='
+-
+-scan "SESSION AND TOKEN CONFIG SITES" "" \
+-	'SESSION_COOKIE_[A-Z]+|CSRF_COOKIE_[A-Z]+|REMEMBER_COOKIE_[A-Z]+|PERMANENT_SESSION_LIFETIME|SESSION_COOKIE_AGE|SESSION_EXPIRE|session\.permanent|JWT_|jwt\.(encode|sign)|expires_delta|exp[\"'\'']?\s*[:=]|maxAge|max_age|SECRET_KEY|secret\s*[:=]'
+-
+-scan2 "STORAGE SITES HOLDING SENSITIVE FIELDS (cleartext-at-rest sites)" "" \
+-	'Column\(|db\.Column|models\.[A-Za-z]+Field\(|@Column|Schema\(|Field\(|CREATE TABLE|ALTER TABLE|ADD COLUMN|add_column|INSERT INTO' \
+-	"$SENSITIVE"
+-
+-files "SEED / FIXTURE / SAMPLE DATA FILES (synthetic only refutes if never seeded)" \
+-	"*seed* *fixture* *sample* *demo* *.sql *.csv" \
+-	'INSERT INTO|password|api_key|secret|ssn|card|token'
+-
+-files "CONFIG AND DEPLOYMENT FILES PRESENT (open these for posture)" \
+-	"Dockerfile* docker-compose* *.yml *.yaml *.ini *.cfg *.toml *.env* Procfile *.tf settings*.py config*.py" \
+-	'DEBUG|debug|host|HOST|port|PORT|ENV|environment|image:|command:'
+-
+-CAP=6
+-echo "--- CONTROLS: where each is actually present ---"
+-echo ""
+-
+-scan "RATE LIMIT / ANTI-AUTOMATION PRESENT" "" \
+-	'limiter|Limiter|@ratelimit|ratelimit|RateLimit|rate_limit|throttle|Throttle|slowapi|express-rate-limit|Bucket4j|resilience4j|captcha|recaptcha|hcaptcha|turnstile|failed_(attempt|count|login)s?|login_attempt|LoginAttempt|lockout|locked_until|backoff'
+-
+-scan "AUTH / AUTHZ GUARDS PRESENT" "" \
+-	'login_required|@login|jwt_required|token_required|auth_required|requires_auth|requireAuth|isAuthenticated|IsAuthenticated|permission_classes|has_permission|@PreAuthorize|@Secured|@RolesAllowed|before_request|Depends\(|middleware\.[Aa]uth|passport\.|ensureLoggedIn|current_user|\[Authorize\]'
+-
+-scan "SESSION TERMINATION / REVOCATION PRESENT" "" \
+-	'session\.(clear|flush|pop|destroy|invalidate)|logout_user|destroy_session|invalidateSession|revoke|revocation|jti|token_version|password_changed_at|denylist|blocklist|blacklist|deleted_tokens|refresh_token_rotation'
+-
+-scan "COOKIE FLAGS AND TRANSPORT SECURITY PRESENT" "" \
+-	'httponly|HttpOnly|[Ss]ecure\s*[:=]|samesite|SameSite|SECURE_SSL_REDIRECT|SECURE_HSTS|Strict-Transport-Security|HSTS|force_https|SESSION_COOKIE_SECURE|PREFERRED_URL_SCHEME'
+-
+-scan "CSRF PROTECTION PRESENT" "" \
+-	'CSRFProtect|CsrfViewMiddleware|csrf_token|csrf_exempt|WTF_CSRF|csurf|csrf-token|X-CSRF|XSRF|AntiForgery|@csrf'
+-
+-scan "SECURITY HEADERS PRESENT" "" \
+-	'Content-Security-Policy|X-Frame-Options|X-Content-Type-Options|Referrer-Policy|Permissions-Policy|Talisman|helmet|frame_options|X-XSS-Protection'
+-
+-scan "PASSWORD / FIELD ENCRYPTION PRIMITIVES PRESENT" "" \
+-	'bcrypt|argon2|pbkdf2|scrypt|generate_password_hash|check_password_hash|werkzeug\.security|passlib|PasswordEncoder|Fernet|AES|KMS|encrypt|EncryptedType|pgcrypto'
+-
+-CAP=12
+-echo "--- POSTURE HOLES: these hits are usually findings on sight ---"
+-echo ""
+-
+-scan "DEBUG / EXPOSURE POSTURE" "" \
+-	'debug\s*=\s*True|DEBUG\s*=\s*True|debug:\s*true|app\.run\(|ALLOWED_HOSTS\s*=|\*.{0,3}ALLOWED|host\s*=\s*.0\.0\.0\.0|--reload|FLASK_ENV|FLASK_DEBUG|NODE_ENV|display_errors|expose_php|printStackTrace|print_exc|traceback\.format_exc|autoreload|werkzeug'
+-
+-scan "TLS VERIFICATION DISABLED" "" \
+-	'verify\s*=\s*False|verify_ssl\s*=\s*False|rejectUnauthorized\s*:\s*false|CURLOPT_SSL_VERIFY(PEER|HOST)\s*,\s*(0|false)|InsecureSkipVerify|_create_unverified|check_hostname\s*=\s*False|NODE_TLS_REJECT_UNAUTHORIZED|TrustAllCerts|ALLOW_ALL_HOSTNAME'
+-
+-scan "WEAK HASH OR NO HASH ON CREDENTIALS" "" \
+-	'hashlib\.(md5|sha1)\(|MD5|SHA1|password\s*=\s*(request|req|\$_|body|data|params)|password\s*==\s*|plain_?password|raw_password'
+-
+-echo "### END MISSING-CONTROLS PROBE"
+-exit 0
+diff -ruN a/.vvaharness/skills/sensitive-data/SKILL.md b/.vvaharness/skills/sensitive-data/SKILL.md
+--- a/.vvaharness/skills/sensitive-data/SKILL.md	2026-10-27 12:15:24.025466066 +0000
++++ b/.vvaharness/skills/sensitive-data/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,81 +0,0 @@
+----
+-name: "sensitive-data"
+-description: "Find sensitive data reaching somewhere it should not: PII, credentials or internals in HTTP responses, logs, error pages, templates, caches, headers, debug routes, or stored unprotected. Point-of-occurrence — no injection path required. Ships probe.sh, which greps every leak channel (debug flags, exception-to-response, log calls on sensitive names, whole-object serialization, weak password storage, cache and HSTS headers, introspection routes, settings constants)."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Sensitive Data Lens
+-
+-You are a Sensitive-Data-Exposure expert. Hunt places where the application
+-reveals more than necessary — to the user, to logs, or at rest. These are
+-point-of-occurrence findings: you do NOT need an injection path. The question
+-is only "does this output, store, or log contain data an attacker can harvest?"
+-
+-HARD GATE — a finding requires BOTH:
+-  (a) genuinely sensitive data: credentials, session tokens, PII (SSN, DOB,
+-      card PAN, bank account, health record), internal system details (stack
+-      traces, SQL text, server paths, version strings), or confidential
+-      business data (pricing, unreleased features), AND
+-  (b) a channel an attacker reaches or can read: response body, response
+-      header, error page, log file, temp file, world-readable DB column, URL
+-      or query string, or an unauthenticated debug endpoint.
+-Generic `print()` / `console.log()` on non-sensitive variables is NOT a
+-finding. "We should encrypt this" with no concrete exposure path → LOW.
+-
+-## Probe first
+-
+-`sh .vvaharness/skills/sensitive-data/probe.sh [root]` — labelled `file:line`
+-sections across error/debug exposure, logging, response and serialization
+-leakage, storage, headers and caching, debug/admin routes, and settings
+-constants. Every line is a CANDIDATE; apply the gate to each.
+-
+-## Polarity: three sections are findings when EMPTY
+-
+-- **`strong KDF present` → `(none)`** and passwords are stored with no
+-  key-derivation function at all. That is the finding.
+-- **`Cache-Control / no-store` → `(none)`** on an app serving authenticated
+-  pages: proxies and browsers cache PII.
+-- **`Strict-Transport-Security` → `(none)`** on an HTTPS app: downgrade is open.
+-
+-## Judgement the grep cannot make
+-
+-- **Look at the template file, not only the view.** A view that *catches* an
+-  exception and passes the raw message into the render context still leaks it.
+-  The leak is in the `.html`, where `{{ error }}` / `{{ sql_error }}` /
+-  `{{ exception }}` prints it. Read both sides before deciding.
+-- **Serialization needs a field audit.** `to_dict()` / `__dict__` /
+-  `model_to_dict()` is only a finding when the model actually carries fields
+-  the caller must not see — `is_admin`, `internal_id`, `token`,
+-  `hashed_password`. Open the model and check.
+-- **Settings constants: judge the name, then the value.** The probe lists every
+-  ALL_CAPS constant holding a non-trivial string literal. Flag the ones whose
+-  name suggests sensitivity even when they do not follow the framework's
+-  `SECRET_KEY` convention — `flag`, `secret`, `key`, `token`, `data`,
+-  `credential`, `password`. A literal like `SENSITIVE_DATA = 'FLAG...'` is a
+-  finding; `APP_NAME = 'billing-service'` is not.
+-- **Placeholders and reads are not literals.** `os.environ[...]`,
+-  `${VAR}`, and vault lookups in a credential position are indirection.
+-- **Sensitive name is not sensitive content.** A log line mentioning
+-  `token_count` or a column named `flagged_at` matches the pattern and is
+-  nothing. Read the value that actually flows.
+-- **Reachability of a debug route.** `/metrics` or `/health` behind
+-  authentication or bound to localhost is not exposure. Django admin reachable
+-  at `/admin/` is not a finding by itself — flag it only when it discloses more
+-  than expected (user emails, session tokens).
+-- **Severity follows blast radius.** One user's DOB in a log is MEDIUM; every
+-  user's PAN in a world-readable file is HIGH.
+diff -ruN a/.vvaharness/skills/sensitive-data/probe.sh b/.vvaharness/skills/sensitive-data/probe.sh
+--- a/.vvaharness/skills/sensitive-data/probe.sh	2026-10-27 12:15:24.025712483 +0000
++++ b/.vvaharness/skills/sensitive-data/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,79 +0,0 @@
+-#!/bin/sh
+-# Sensitive-data exposure sweep: greps the channels where PII, secrets and internals leak — responses, logs, templates, storage, headers, debug routes.
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-ROOT="${1:-.}"
+-CAP=20
+-XD="--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=venv --exclude-dir=__pycache__ --exclude-dir=dist --exclude-dir=build --exclude-dir=.vvaharness --exclude-dir=vendor"
+-Q="['\"]"
+-SENS="pass(wd|word)?|secret|token|api_?key|apikey|private_key|credential|ssn|social_security|birth|card_?(no|num|number)|cvv|iban|account_?num|salary|medical|diagnos|flag"
+-
+-hits() {
+-	label=$1
+-	pat=$2
+-	shift 2
+-	printf '\n== %s ==\n' "$label"
+-	out=$(grep -rEni --binary-files=without-match $XD "$pat" "$@" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$out" ]; then
+-		echo "(none)"
+-	else
+-		printf '%s match(es); showing up to %s\n' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "$CAP"
+-		printf '%s\n' "$out" | head -n "$CAP"
+-	fi
+-}
+-
+-TPL="--include=*.html --include=*.htm --include=*.jinja --include=*.jinja2 --include=*.j2 --include=*.tpl --include=*.erb --include=*.hbs --include=*.twig --include=*.ejs --include=*.vue"
+-CFG="--include=*settings*.py --include=*config*.py --include=*conf*.py --include=*constants*.py --include=*.properties --include=*settings*.rb --include=*config*.js --include=*config*.ts"
+-
+-echo "SENSITIVE-DATA EXPOSURE SWEEP under: $ROOT"
+-echo "Candidates only. Each needs sensitive content AND an attacker-reachable channel."
+-
+-printf '\n--- ERROR AND DEBUG EXPOSURE ---\n'
+-hits "debug mode on" 'DEBUG[[:space:]]*=[[:space:]]*True|debug[[:space:]]*=[[:space:]]*True|app\.debug|FLASK_DEBUG|ASPNETCORE_ENVIRONMENT[[:space:]]*[:=][[:space:]]*.?Development|display_errors[[:space:]]*=[[:space:]]*On|NODE_ENV[[:space:]]*[:=][[:space:]]*.?development'
+-hits "exception text returned to the caller" 'return[^;]*str\(e\)|jsonify\([^)]*(str\(e\)|e\.message|exc)|error[^;]*:[[:space:]]*(str\(|f")|res\.(send|json)\([^)]*(err|error)|printStackTrace|getStackTrace|traceback\.format_exc|\.stack[[:space:]]*[,)}]'
+-hits "raw exception or SQL passed into a template context" '(render|render_template|render_to_response|res\.render)\([^)]*(error|exception|exc|err|sql|query|message|traceback)'
+-hits "template variables that render internals" '\{[\{%][[:space:]]*=?[[:space:]]*(error|err|exception|exc|sql|sql_error|query|message|traceback|stack)' $TPL
+-
+-printf '\n--- LOGGING ---\n'
+-hits "sensitive names inside a log/print call" "(log(ger|ging)?|print|console|System\\.out|fmt\\.Print|puts|NSLog)[^;]*($SENS)"
+-hits "whole request, body, or auth header logged" '(log|logger|print|console)[^;]*((request|req)\.(body|data|form|args|json|headers|POST|GET|cookies)|Authorization|Bearer|set-cookie)'
+-hits "request/response logging middleware" 'LoggingMiddleware|log_request|morgan\(|RequestLoggingFilter|CommonsRequestLoggingFilter|http_logger|axios.*interceptors'
+-
+-printf '\n--- RESPONSE / SERIALIZATION LEAKAGE ---\n'
+-hits "whole-object serialization with no field allow-list" '\.__dict__|to_dict\(\)|model_to_dict\(|\.serialize\(\)|\.dict\(\)|vars\(|JSON\.stringify\([a-z_]+\)|fields[[:space:]]*=[[:space:]]*.__all__|exclude[[:space:]]*=[[:space:]]*\(\)'
+-hits "sensitive field names in a serializer or query projection" "(fields|columns|select|attributes|only|values)[[:space:]]*[:=][^;]*($SENS)"
+-hits "sensitive values rendered into markup" "\\{[\\{%][^}]*($SENS)|<input[^>]*hidden[^>]*($SENS)|<!--[^>]*($SENS)" $TPL
+-
+-printf '\n--- STORAGE ---\n'
+-hits "weak or reversible password handling" 'md5|sha1\(|sha256\([^)]*pass|base64[^;]*pass|rot13|password[[:space:]]*==|encode\([^)]*pass'
+-hits "strong KDF present (absent = passwords unprotected)" 'bcrypt|argon2|scrypt|pbkdf2|make_password|password_hash\(|PasswordEncoder|Devise'
+-hits "sensitive column declared with no protection" "($SENS)[^;]*(Column|Field|VARCHAR|TEXT|String\\(|char\\()"
+-hits "world-writable or temp files holding data" 'chmod\([^)]*(0?777|0?666)|tempfile\.mktemp|os\.umask\(0\)|/tmp/'
+-
+-printf '\n--- HEADERS / CACHING / TRANSPORT ---\n'
+-hits "Cache-Control / no-store (absent = PII cacheable by proxies)" 'Cache-Control|no-store|Pragma'
+-hits "Strict-Transport-Security (absent on HTTPS = downgrade)" 'Strict-Transport-Security|SECURE_HSTS_SECONDS|hsts'
+-hits "framework / version disclosure headers" 'X-Powered-By|X-AspNet-Version|expose_php|Server[[:space:]]*[:=][[:space:]]*.?(Apache|nginx|Express|Werkzeug)'
+-
+-printf '\n--- DEBUG / ADMIN ROUTES ---\n'
+-hits "introspection routes" "(route|path|get|post|mapping)\\([^)]*$Q?/?(debug|status|health|metrics|actuator|env|config|phpinfo|trace|dump|_profiler|admin)"
+-hits "config or environment object handed out" 'app\.config|settings\.__dict__|os\.environ(\[|\.items|\.copy|\))|process\.env[[:space:]]*[,)}]|GetEnvironmentVariables|ConfigurationManager\.AppSettings'
+-
+-printf '\n--- SETTINGS CONSTANTS (judge each name and value) ---\n'
+-hits "ALL_CAPS constant assigned a non-trivial string literal" "^[[:space:]]*[A-Z][A-Z0-9_]{3,}[[:space:]]*[:=][[:space:]]*$Q[^$Q]{6,}$Q" $CFG
+-
+-printf '\n(end of sweep)\n'
+-exit 0
+diff -ruN a/.vvaharness/skills/sibling-instances/SKILL.md b/.vvaharness/skills/sibling-instances/SKILL.md
+--- a/.vvaharness/skills/sibling-instances/SKILL.md	2026-10-27 12:15:24.026008905 +0000
++++ b/.vvaharness/skills/sibling-instances/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,89 +0,0 @@
+----
+-name: sibling-instances
+-description: After confirming a weakness, sweep the repository for every other site of the same pattern and report each one — a class confirmed at one location is almost never present at only one location.
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Sibling-Instance Sweep
+-
+-A weakness class is a property of how the codebase was written, not of one line. The
+-developer who interpolated a value into SQL once did it wherever they wrote SQL; the one
+-who reached for MD5 reached for it in every hashing path. So once you have **confirmed** a
+-class at one site, the question is no longer "is this a bug" — it is **"where else?"**
+-
+-Reporting one instance of a repeated defect is a partial answer that reads like a complete
+-one. The person who applies your fix patches the site you named and ships the rest.
+-
+-## When this applies
+-
+-Only **after** a confirmation. Do not sweep for a class you just refuted, and do not sweep
+-speculatively for classes you have no evidence of — that is how precision dies.
+-
+-## The sweep
+-
+-1. **Name the pattern you just confirmed**, concretely enough to search for: the sink call,
+-   the algorithm name, the decorator that was missing, the flag that was unset.
+-2. **Grep the whole repository for it.** Not the file you were given, not the directory —
+-   the repository. Use two or three phrasings, because the same defect rarely looks
+-   identical twice: `hashlib.md5` and `md5(`; `f"SELECT` and `"SELECT " +` and
+-   `.format(` near `execute`; `set_cookie(` with and without keyword arguments.
+-3. **Open every hit and judge it on its own evidence.** A hit is a candidate, not a finding.
+-   The same call in a test fixture, behind a different guard, or on a value that is a fixed
+-   literal is a different situation and may be fine.
+-4. **Report one finding per confirmed site**, each with its own file and its own line span
+-   pointing at the construct a fix would edit. Do not fold five sites into one finding with
+-   five paths in the description — each site needs its own anchor to be actionable, and a
+-   single blanket finding can only ever be credited, tracked or fixed once.
+-5. **Do not pad.** Near-identical findings at the *same* construct are duplicates, not
+-   breadth. One per distinct site.
+-
+-## Patterns that recur, from most to least reliably
+-
+-- **Query construction.** One interpolated query means the whole data-access layer is
+-  suspect. Check every `execute` / `query` / `raw` call, including ones in different
+-  modules from the one you started in.
+-- **Hashing and randomness.** A weak hash or a predictable RNG appears wherever that
+-  operation is performed — registration *and* login *and* password reset *and* a token
+-  minter. The classic miss is exactly this: MD5 in the model's `set_password` **and**
+-  inline in the registration handler.
+-- **Regex compiled from a pattern with nested quantifiers.** ReDoS lives in every such
+-  pattern in the file, not the first one.
+-- **Outbound requests.** One un-allow-listed URL fetch usually means several, often in the
+-  same helper module, each reachable from a different route.
+-- **Deserialization.** `yaml.load` / `pickle.loads` / native object streams tend to appear
+-  in an import path *and* an export path *and* a cache layer.
+-- **Cookie writes and header setters.** Frequently one per handler, each missing the same
+-  flags, with a config default that covers none of them.
+-- **Decorator omissions.** If one handler in a module lacks the guard its siblings have,
+-  check every handler in that module — and every other module with the same shape.
+-
+-## The other axis: the same location, a different class
+-
+-The converse of this sweep, and just as commonly missed. One handler routinely holds
+-several unrelated weaknesses — a missing authorization check *and* an injection sink *and*
+-an unflagged cookie *and* a logic flaw on the amount. Before you leave a location you have
+-already read, ask what *else* is wrong with it, and report each class separately with its
+-own CWE. Two classes at one line are two findings, not one broad finding.
+-
+-## Rationale requirement
+-
+-State what you swept for, how many candidate sites the search returned, and how many you
+-confirmed. "Grepped `hashlib.md5` across the repo: 2 hits, both confirmed, at the two
+-password-writing sites I cite below" is the shape of a complete answer — the sweep term, the
+-hit count, and the confirmed count. A confirmation with no sweep leaves
+-the reader unable to tell whether the class was isolated or you simply stopped looking.
+diff -ruN a/.vvaharness/skills/ssrf/SKILL.md b/.vvaharness/skills/ssrf/SKILL.md
+--- a/.vvaharness/skills/ssrf/SKILL.md	2026-10-27 12:15:24.026376400 +0000
++++ b/.vvaharness/skills/ssrf/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,92 +0,0 @@
+----
+-name: ssrf
+-description: Hunt Server-Side Request Forgery (CWE-918) — any outbound fetch whose URL, scheme, host or port derives from a request. Activate on avatar-by-URL, webhook/callback registration, URL preview/unfurl, render-to-PDF/screenshot/thumbnailer, import-from-URL, feed ingest, OAuth redirect_uri/jwks_uri discovery, "test connection" probes, proxy and media passthrough, and on helpers named download/fetch/get_image/get_base64_image_blob/load_url whose bodies you cannot see. Ships probe.sh, which greps fetch sinks across seven ecosystems, url-parameter contracts, their call sites and allow-list posture in one pass. Keywords SSRF, requests.get, urlopen, httpx, fetch, axios, OkHttp, curl_exec, 169.254.169.254, cloud metadata, gopher://, allow_redirects, DNS rebinding, blind SSRF, URLField.
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# SSRF Lens
+-
+-The application is the attacker's HTTP client: inside the perimeter, holding an instance role.
+-
+-HARD GATE — all three, or no finding:
+-  (a) SINK — a call doing network I/O to a URL, host or port, OR a function whose contract is to
+-      fetch a URL (parameter `url`/`uri`/`src`/`endpoint`/`callback`, or name in
+-      download/fetch/get_*/import_*/render_*) even when its body is stubbed, vendored or unseen;
+-  (b) SOURCE — the URL derives from a request-controlled channel (query, form, JSON body, header,
+-      path segment, webhook registration, uploaded document) or a DB column an untrusted party
+-      wrote earlier (second-order);
+-  (c) NO allow-list of scheme AND host enforced on the address actually connected to.
+-Literal URL, or one only settable through deployment config: DROP.
+-
+-## Run the probe first
+-
+-`sh .vvaharness/skills/ssrf/probe.sh` (optional arg: subtree) prints labelled path:line hits for
+-fetch sinks in all seven ecosystems, indirect mechanisms (XXE, headless render, image coders,
+-`dblink`), url-parameter contracts AND their call sites, request sources, allow-list and redirect
+-posture, and — only when a sink exists — reference tables of internal targets, admin ports,
+-schemes, redirect defaults, rebinding races and deny-list bypasses to cite. An empty ecosystem
+-section means the repo does not use it; empty sink sections do NOT end the hunt. Trace helpers to
+-callers with GraphImporters and GraphNeighbors.
+-
+-## THE SHAPE WE MISS MOST — an opaque fetch helper
+-
+-A route hands a request-supplied URL to a local helper whose body holds no greppable HTTP call: a
+-stub, a thin wrapper, a vendored module, a C extension. The `url` PARAMETER is the sink. Measured
+-instance: a route assigned `get_base64_image_blob(form.url.data)` out of `ImageForm(request.form)`
+-where the helper module was nine lines of stubs returning empty literals, with no HTTP client
+-imported anywhere and none in `requirements.txt`. Nothing text-matches: the fetch IS the contract
+-of the parameter. Never refute on "the body makes no request", "the helper is a stub" or "no HTTP
+-library is installed". Same repo's fake defence: WTForms `URLField('url',
+-[validators.DataRequired()])` is a widget plus a non-emptiness check — no scheme, host or
+-resolution — and the template posted free-text `<input type="text" name="url">`.
+-ANCHOR the span on the route's call site; when only the helper's contract is in evidence, anchor
+-its `def` line and name the calling route.
+-
+-## What still counts
+-
+-Blind — status, latency, byte count or error text only — is SSRF: port scanning, reachability
+-mapping, `gopher://` POST-shaped effects. Say which channel the attacker observes. A fetched body
+-written to a column no template reads back is still a finding; never refute because the response
+-is discarded, but grep for a reader — if it is re-served, severity rises, so say so. Name the
+-internal target you reach. A host check that resolves once, or a deny-list of private literals,
+-does not hold: cite the per-hop redirect rule, the rebinding race, one bypass string.
+-
+-## FP CHECKS — what genuinely refutes this
+-
+-Refute, saying which applies, on: an allow-list of BOTH scheme and host enforced against the
+-RESOLVED address (resolve, reject non-public or non-listed IPs, connect to that pinned address,
+-redirects re-checked per hop or disabled); egress through a destination-restricting proxy or
+-gateway configured IN THIS REPO, or an SSRF-hardened client; a hardcoded URL, or a fixed base
+-where input fills only a path or query segment and cannot change host, port or scheme (path
+-traversal or parameter injection, another class); a URL from trusted deployment config and no
+-request field — unless a handler can write that config value. NOT refutations: scheme-only checks,
+-a host check on the unresolved string, and syntax validators (`validators.URL()`, `URLField`,
+-`new URL(s)`, `^https?://`) — they constrain the string, not the destination.
+-
+-## ENUMERATION RULE (CRITICAL — do not skip)
+-
+-One finding per distinct sink site. Two routes calling the same fetch helper are TWO findings,
+-each anchored at its own span — each has its own source, reachability and guard. The helper is a
+-third only if independently reachable; an exported fetch helper with no caller in the repo is a
+-library entry point, reported separately or not at all, never merged into a route's finding. Never
+-collapse sites into "URL input is not validated", and report SSRF separately from any other class
+-at the same lines (open redirect, path traversal, XXE) — different fixes.
+-
+-CWE, exactly one: 918 by default; 611 when an XML parser's external entity is the fetch mechanism;
+-441 when the endpoint exists to relay arbitrary requests. 601 is open redirect, never a
+-substitute. Call CweGuidance for your id.
+diff -ruN a/.vvaharness/skills/ssrf/probe.sh b/.vvaharness/skills/ssrf/probe.sh
+--- a/.vvaharness/skills/ssrf/probe.sh	2026-10-27 12:15:24.026663286 +0000
++++ b/.vvaharness/skills/ssrf/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,174 +0,0 @@
+-#!/bin/sh
+-# SSRF probe: greps outbound-fetch sinks, url-parameter helper contracts, request sources and
+-# redirect/allow-list posture across seven ecosystems, grouped so an empty section is a finding.
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-set -f
+-ROOT=${1:-.}
+-CAP=${SSRF_PROBE_CAP:-12}
+-WIDTH=140
+-EX="--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.venv --exclude-dir=venv
+---exclude-dir=.tox --exclude-dir=dist --exclude-dir=build --exclude-dir=__pycache__
+---exclude-dir=site-packages --exclude-dir=.mypy_cache --exclude-dir=target
+---exclude-dir=.next --exclude-dir=coverage
+---exclude-dir=.vvaharness --exclude-dir=security-scan --exclude=SKILL.md --exclude=probe.sh"
+-
+-# scan LABEL "INCLUDE_GLOBS" "ERE" — prints capped path:line hits, or (none).
+-scan() {
+-	_label=$1
+-	_globs=$2
+-	_pat=$3
+-	_inc=
+-	for _g in $_globs; do _inc="$_inc --include=$_g"; done
+-	echo "== $_label =="
+-	_out=$(grep -rEn --binary-files=without-match $_inc $EX -- "$_pat" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$_out" ]; then
+-		echo "(none)"
+-	else
+-		FOUND=1
+-		_n=$(printf '%s\n' "$_out" | wc -l | tr -d ' ')
+-		printf '%s\n' "$_out" | head -n "$CAP" | cut -c1-$WIDTH
+-		[ "$_n" -gt "$CAP" ] && echo "... $_n hits total, showing $CAP - grep this pattern yourself for the rest"
+-	fi
+-	echo ""
+-}
+-
+-# count LABEL "INCLUDE_GLOBS" "ERE" — prints only the match count and a 3-line sample.
+-count() {
+-	_label=$1
+-	_globs=$2
+-	_pat=$3
+-	_inc=
+-	for _g in $_globs; do _inc="$_inc --include=$_g"; done
+-	echo "== $_label =="
+-	_out=$(grep -rEn --binary-files=without-match $_inc $EX -- "$_pat" "$ROOT" 2>/dev/null || true)
+-	if [ -z "$_out" ]; then
+-		echo "(none)"
+-	else
+-		printf '%s hits; sample:\n' "$(printf '%s\n' "$_out" | wc -l | tr -d ' ')"
+-		printf '%s\n' "$_out" | head -n 3 | cut -c1-$WIDTH
+-	fi
+-	echo ""
+-}
+-
+-PY='*.py *.pyi'
+-JS='*.js *.jsx *.ts *.tsx *.mjs *.cjs *.vue *.svelte'
+-JV='*.java *.kt *.kts *.scala *.groovy'
+-RB='*.rb *.rake *.erb Gemfile Rakefile'
+-PH='*.php *.phtml *.inc'
+-GO='*.go'
+-NET='*.cs *.vb *.fs *.fsx'
+-
+-echo "### SSRF PROBE root=$ROOT"
+-echo ""
+-
+-scan "PYTHON FETCH SINKS" "$PY" \
+-	'requests\.(get|post|put|patch|delete|head|request)|Session\(\)?\.(get|post|request)|httpx\.(get|post|request|stream|Client|AsyncClient)|urllib\.request|urlopen|urlretrieve|http\.client\.HTTP|aiohttp\.(ClientSession|request)|pycurl|socket\.(connect|create_connection)|smtplib\.|ftplib\.'
+-
+-scan "JS/TS FETCH SINKS" "$JS" \
+-	'\bfetch\(|axios[.(]|node-fetch|undici|require\(.got.\)|from .got.|\bsuperagent|\bhttps?\.(get|request)\(|\.goto\(|new URL\([^)]*(url|uri|src|input|req)'
+-
+-scan "JAVA/KOTLIN FETCH SINKS" "$JV" \
+-	'OkHttpClient|Request\.Builder|HttpRequest\.newBuilder|RestTemplate|WebClient\.|HttpClient\.(send|newHttpClient)|new URL\(|openConnection\(|HttpGet|HttpPost|URI\.create|Jsoup\.connect'
+-
+-scan "RUBY FETCH SINKS" "$RB" \
+-	'Net::HTTP|URI\.(open|parse)|open-uri|Faraday|HTTParty|RestClient|Excon|Typhoeus'
+-
+-scan "PHP FETCH SINKS" "$PH" \
+-	'curl_(init|setopt|exec)|CURLOPT_URL|file_get_contents\s*\(|fopen\s*\(|GuzzleHttp|Guzzle\\|Http::(get|post)|readfile\s*\('
+-
+-scan "GO FETCH SINKS" "$GO" \
+-	'http\.(Get|Post|Head|PostForm|NewRequest|NewRequestWithContext)|\.Client\{|[Cc]lient\.Do\(|resty\.|net\.Dial'
+-
+-scan ".NET FETCH SINKS" "$NET" \
+-	'HttpClient|WebRequest\.Create|WebClient|HttpWebRequest|GetStringAsync|(Get|Post|Send)Async\(|DownloadString'
+-
+-scan "INDIRECT FETCH MECHANISMS (render/XXE/image/db)" "" \
+-	'wkhtmltopdf|WeasyPrint|puppeteer|playwright|pdfkit|imgkit|ImageMagick|wand\.image|pyvips|libvips|rsvg|cairosvg|postgres_fdw|dblink|resolve_entities|XMLResolver|DocumentBuilderFactory|SAXParser|etree\.(parse|fromstring)|libxml|xmlrpc|SimpleXML|LOAD DATA'
+-
+-scan "URL-PARAMETER CONTRACTS (opaque fetch helpers - sink even with an empty body)" "" \
+-	'(def|function|func|fun|sub|public|private|protected|static)[^();]*\(([^)]*[^A-Za-z_])?(url|uri|src|source_url|endpoint|callback|callback_url|webhook|webhook_url|href|link|target_url|remote|image_url|feed_url)([^A-Za-z_][^)]*)?\)'
+-
+-scan "FETCH-NAMED HELPERS (name is the contract)" "" \
+-	'(def|function|func|fun|public|private|static)[^();]*\b\w*(download|fetch|get_image|get_base64|load_url|loadUrl|import_|render_|screenshot|thumbnail|thumb|preview|unfurl|oembed|proxy_|passthrough|health_?check|test_connection|avatar|favicon|scrape|crawl|mirror|webhook)\w*\s*\('
+-
+-echo "== CALL SITES OF FETCH-NAMED HELPERS (anchor the finding here, not at the def) =="
+-_calls=$(grep -rEn --binary-files=without-match $EX -- \
+-	'\b\w*(download|fetch|get_image|get_base64|load_url|loadUrl|import_url|import_from|render_url|render_pdf|screenshot|thumbnail|thumb|preview|unfurl|oembed|proxy_|passthrough|scrape|crawl|mirror|send_webhook|call_webhook)\w*\s*\(' \
+-	"$ROOT" 2>/dev/null | grep -vE '\b(def|function|func|fun|sub)\b' || true)
+-if [ -z "$_calls" ]; then
+-	echo "(none)"
+-else
+-	printf '%s\n' "$_calls" | head -n "$CAP" | cut -c1-$WIDTH
+-fi
+-echo ""
+-
+-scan "REQUEST SOURCES ON URL-SHAPED NAMES" "" \
+-	'(request\.(args|form|json|values|data|GET|POST|query_params|get_json|headers)|req\.(query|body|params)|\$_(GET|POST|REQUEST)|params\[|form\.\w+\.data|@RequestParam|@RequestBody|@PathVariable|ctx\.(query|request)|c\.Query|r\.(URL|FormValue))[^;]*(url|uri|src|endpoint|callback|webhook|host|link|href|target|image|avatar|feed|address)'
+-
+-SINKS=$FOUND
+-CAP=8
+-scan "REDIRECT / RESOLUTION / ALLOW-LIST POSTURE (empty = gate condition (c) unmet by default)" "" \
+-	'allow_redirects|follow_redirects|followRedirects|CURLOPT_FOLLOWLOCATION|redirect:\s*.(follow|manual|error)|max_redirects|getaddrinfo|gethostbyname|InetAddress\.getByName|ip_address\(|ipaddress\.|is_private|is_loopback|is_global|urlparse|urlsplit|\.hostname|allow_?list|allowed_?hosts|ALLOWED_HOSTS|whitelist|blocklist|deny_?list|blacklist|proxies\s*=|advocate|validators\.url|URLField|URLValidator'
+-
+-count "INTERNAL-TARGET AND SCHEME STRINGS PRESENT IN TREE" "" \
+-	'169\.254\.169\.254|metadata\.google\.internal|100\.100\.200\.200|127\.0\.0\.1|localhost|0\.0\.0\.0|::1|svc\.cluster\.local|\.internal\b|192\.168\.|10\.[0-9]+\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.|file://|gopher://|dict://|ldap://|jar:|netdoc:'
+-
+-echo "== DECLARED HTTP-CLIENT DEPENDENCIES (absence NEVER refutes a fetch sink) =="
+-_dep=$(grep -rEn --binary-files=without-match $EX \
+-	--include=requirements*.txt --include=pyproject.toml --include=setup.py --include=Pipfile \
+-	--include=package.json --include=pom.xml --include=build.gradle* --include=go.mod \
+-	--include=Gemfile --include=composer.json --include=*.csproj \
+-	-- 'requests|httpx|aiohttp|urllib3|pycurl|axios|node-fetch|got|undici|superagent|okhttp|httpclient|resttemplate|webflux|faraday|httparty|rest-client|guzzle|curl' \
+-	"$ROOT" 2>/dev/null || true)
+-if [ -z "$_dep" ]; then
+-	echo "(none) - no HTTP client declared; a url-parameter helper is STILL a sink"
+-else
+-	printf '%s\n' "$_dep" | head -n 12
+-fi
+-echo ""
+-
+-# Reference tables, printed only when this tree actually has a sink or a url-contract helper.
+-if [ -n "$SINKS" ]; then
+-	cat <<'REF'
+-== REFERENCE: bypasses to name against any host check or deny-list above ==
+-decimal 2130706433 | octal 0177.0.0.1 | hex 0x7f.1 | short 127.1 | IPv4-mapped [::ffff:127.0.0.1] | [::]
+-credentials prefix http://allowed.com@169.254.169.254/ | trailing dot metadata.google.internal.
+-mixed-case scheme HTTP:// FiLe:// | attacker DNS resolving private 127.0.0.1.nip.io
+-percent-encoded or IDN host | fragment trick http://evil/#@169.254.169.254/
+-
+-== REFERENCE: redirect following (the allow-list must re-run on EVERY hop) ==
+-on by default: requests allow_redirects=True | urllib urlopen | JS fetch | OkHttp followRedirects
+-off, commonly switched on: httpx follow_redirects=True | HttpClient.Builder.followRedirects(ALWAYS) | PHP CURLOPT_FOLLOWLOCATION
+-an allowed host that 302s to 169.254.169.254 wins unless every hop is re-checked
+-
+-== REFERENCE: check-then-fetch races (TOCTOU / DNS rebinding) ==
+-a getaddrinfo / gethostbyname / InetAddress.getByName check followed by a fetch on the original
+-string resolves twice and can see a different address the second time - same defect when code
+-inspects urlparse(...).hostname or new URL(s).hostname but hands the raw string to the client
+-
+-== REFERENCE: internal targets to name, highest impact first ==
+-metadata (credential theft): 169.254.169.254/latest/meta-data/iam/security-credentials/ (AWS)
+-  metadata.google.internal + header Metadata-Flavor: Google | 169.254.169.254/metadata/instance + Metadata: true (Azure) | 100.100.200.200 (Alibaba)
+-private space: localhost 127.x.x.x ::1 0.0.0.0 | 10/8 172.16/12 192.168/16 169.254/16 | *.internal *.local *.svc.cluster.local | unqualified names via search domains
+-admin ports: 2375 docker | 6379 redis | 9200 elasticsearch | 8500 consul | 10250 kubelet | 5432 3306 db | 15672 rabbit | 9090 prometheus
+-schemes: file:///etc/passwd | gopher:// crafted TCP to redis/smtp | dict:// | ftp:// | ldap:// | jar: netdoc: in Java
+-REF
+-	echo ""
+-fi
+-
+-echo "### END SSRF PROBE"
+-exit 0
+diff -ruN a/.vvaharness/skills/templates/SKILL.md b/.vvaharness/skills/templates/SKILL.md
+--- a/.vvaharness/skills/templates/SKILL.md	2026-10-27 12:15:24.026986756 +0000
++++ b/.vvaharness/skills/templates/SKILL.md	1970-01-01 00:00:00.000000000 +0000
+@@ -1,125 +0,0 @@
+----
+-name: templates
+-description: "View-layer lens: stored and reflected XSS in server-rendered templates of every dialect (Jinja2 |safe / autoescape false / safe_columns, Django mark_safe, Handlebars {{{ }}}, ERB raw / html_safe, Thymeleaf th:utext, JSP <%= %>, Vue v-html, React dangerouslySetInnerHTML, Razor @Html.Raw, Go text/template), context-confusion bugs in href / src / onclick / <script> interpolations, SSTI from runtime-built template source, template-layer information disclosure, and state-changing forms rendered with no CSRF token. Activate whenever the repo holds templates/, views/, *.html, *.j2, *.erb, *.hbs, *.jsp, *.cshtml, *.vue, or a render_template / render / res.render call."
+----
+-
+-<!--
+-Copyright 2026 Visa, Inc.
+-
+-Licensed under the Apache License, Version 2.0 (the "License");
+-you may not use this file except in compliance with the License.
+-You may obtain a copy of the License at
+-
+-	http://www.apache.org/licenses/LICENSE-2.0
+-
+-Unless required by applicable law or agreed to in writing, software
+-distributed under the License is distributed on an "AS IS" BASIS,
+-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-See the License for the specific language governing permissions and
+-limitations under the License.
+--->
+-
+-# Template and View-Layer Lens
+-
+-Templates are not call-graph nodes: `GraphSinksInCommunity` and `GraphNeighbors` never return one,
+-so `routes/` and `models/` show you the route that *renders* a template, never the template that
+-*emits* the value. **A template file is a finding LOCATION** — anchor the finding on the template
+-line that emits the value, not on the handler line that renders the template. The fix edits the
+-template.
+-
+-## First move
+-
+-Run `sh .vvaharness/skills/templates/probe.sh` — one read-only pass over every dialect: view-tree
+-inventory, labelled `path:line` hits for the whole sink battery, and a per-`<form>` verdict on
+-whether a CSRF token field sits inside it.
+-
+-Read the layouts and partials it lists **before any leaf page**: one bad interpolation in
+-`base.html` or `fragments/*.html` renders on every page that extends or includes it — highest
+-multiplier in the repo, and the file nobody opens. The probe gives candidates; the judgement below
+-is not greppable.
+-
+-## Hard gate — all four
+-
+-1. **A template sink** — safe/raw marker, autoescape off, a macro kwarg marking a *column* safe, or
+-   a context HTML-escaping misses.
+-2. **A value that is not a template-local constant.** Request field, DB column, filename, exception
+-   object: source. Helper: not. Read *Emptied expressions* before refuting here.
+-3. **A named path from an external actor.** Stored: name the writing handler and the column.
+-   Reflected: name the request field and the `render_template(...)` kwarg carrying it.
+-4. **No context-correct escaper between them** — no sanitizer, no scheme allow-list for URL context,
+-   no `|tojson` for script context.
+-
+-## Context is not one context
+-
+-Escaping `< > & " '` defends the HTML *body* only. Judge by the bytes around the interpolation, not
+-by the filter.
+-
+-- **URL** — `javascript:` and `data:image/svg+xml;base64,…` (SVG runs script inside
+-  `<object>`/`<embed>`/`<iframe>`) hold no HTML metacharacters, so autoescape passes them through
+-  untouched. Needs a scheme allow-list, not escaping.
+-- **Event handler** — the attribute body is JavaScript, and the HTML parser un-escapes entities
+-  before the JS parser sees them.
+-- **Script** — needs `|tojson` / `json_script` / `template.JS`; `</script>` inside a quoted JS
+-  string still ends the block.
+-- **Unquoted attribute** — `class={{u}}`: a space starts `onmouseover=…`. **CSS** — `style` and
+-  `<style>` bodies.
+-
+-## Emptied expressions are still sinks
+-
+-Refusing a blanked or stubbed sink is how this class gets missed. A helper stubbed to return `""`
+-"for SAST compatibility" still sits in live markup fed by a live column: when markup, column and
+-writing handler all exist, report the template line even though today's expression is constant, and
+-name the column the stub stands in for.
+-
+-## The stored path: sink and source are in different files
+-
+-The template reads a column an earlier request wrote; neither file mentions the other.
+-
+-1. Take the interpolated expression (`note.text`, the `safe_columns` entry).
+-2. Grep the view kwarg: `render_template('home.html'` → the route; the kwarg → the query.
+-3. Grep the model attribute and every write to it. `GraphImporters` on the model module and on the
+-   query helper enumerates its readers and writers; the writers are your sources.
+-4. Check who reads it back. `or_(Note.user_id == user_id, Note.private == False)` renders attacker
+-   rows in *other* users' pages — cross-account stored XSS, not self-XSS. Say which.
+-5. Report at the template line, citing the writer's file:line.
+-
+-## Two more classes at these same lines
+-
+-- **Information disclosure**, separate from any XSS on the line. Exception or debug objects
+-  rendered: CWE-209, cause in the handler, location at the template line. Config, secret keys,
+-  password columns, absolute paths, SQL text, version banners: CWE-200 / CWE-540. Hidden is not
+-  secret — `hidden` and `password` input values and `data-` attributes all ship, and
+-  `<!-- HTML comments -->` reach the client where `{# … #}` does not.
+-- **Missing CSRF token**, CWE-352 **at the `<form>` tag**: template finding, template fix. Take the
+-  probe's per-form verdict, then cover `fetch` / `axios` / `$.ajax` POSTs in `<script>` blocks
+-  yourself. Zero CSRF machinery repo-wide plus forms subclassing `wtforms.Form` rather than
+-  `flask_wtf.FlaskForm` makes **every** state-changing form a finding; unused `Flask-WTF` in
+-  `requirements.txt` is not a defence. Handler-side judgement is the `csrf` lens;
+-  `CweGuidance('CWE-352')` has the class detail.
+-
+-## FP checks — what refutes the finding
+-
+-- **Autoescape on, no safe marker, HTML-body or quoted-attribute context.** Jinja under Flask
+-  escapes `"` to `&#34;`, so a quoted attribute holding a plain column is defended. Say why.
+-- **Helper or bounded expression** — `url_for`, `strftime`, an integer PK, a closed enum, a
+-  two-value ternary. Does **not** cover a stubbed helper backed by a live column.
+-- **Re-escaped at the outer interpolation.** `render_template_string()` returns `str`, not `Markup`,
+-  so `<p>{{ msg }}</p>` escapes what the handler built: XSS refuted, SSTI (CWE-1336) not.
+-- **A sanitizer on the write path** — name it and its line. A rich-text editor is not one: CKEditor
+-  / TinyMCE / Quill sanitize in the browser and constrain nothing the POST handler accepts.
+-- **CSP** without `unsafe-inline`, plus a nonce, lowers severity; it does not refute URL- or
+-  attribute-context injection. State what it blocks.
+-- **Not rendered** — under `static/`, a fixture, or absent from the probe's render call sites.
+-
+-## Enumeration rule
+-
+-Every interpolation is its own finding; never one "templates do not escape output" finding.
+-
+-- Open every template the probe's inventory lists, partials included. Do not sample.
+-- One finding per template file **and** line span. The same column rendered unsafe in three
+-  templates is three findings: each is edited separately, and a blanket finding can only be
+-  credited, tracked or fixed once.
+-- One line can carry two classes: CWE-79 at `{{ x | safe }}` and CWE-200 because the field should
+-  not reach the page at all. Split reflected from stored at one sink too — different paths,
+-  different fixes.
+-- State the sweep: templates globbed, interpolations judged, confirmed, autoescape-refuted.
+diff -ruN a/.vvaharness/skills/templates/probe.sh b/.vvaharness/skills/templates/probe.sh
+--- a/.vvaharness/skills/templates/probe.sh	2026-10-27 12:15:24.027022628 +0000
++++ b/.vvaharness/skills/templates/probe.sh	1970-01-01 00:00:00.000000000 +0000
+@@ -1,269 +0,0 @@
+-#!/bin/sh
+-# Template/view-layer sink battery: one read-only pass that prints path:line for every
+-# unescaped-output marker, dangerous interpolation context, info-disclosure expression and
+-# CSRF-token-less form across every template dialect in the repo. Usage: sh probe.sh [root]
+-
+-# Copyright 2026 Visa, Inc.
+-#
+-# Licensed under the Apache License, Version 2.0 (the "License");
+-# you may not use this file except in compliance with the License.
+-# You may obtain a copy of the License at
+-#
+-#     http://www.apache.org/licenses/LICENSE-2.0
+-#
+-# Unless required by applicable law or agreed to in writing, software
+-# distributed under the License is distributed on an "AS IS" BASIS,
+-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-# See the License for the specific language governing permissions and
+-# limitations under the License.
+-
+-ROOT=${1:-.}
+-
+-# The --include=*.ext words below are split but must never be glob-expanded by the shell.
+-set -f
+-
+-SKIP="--exclude-dir=.git --exclude-dir=.hg --exclude-dir=.svn --exclude-dir=node_modules
+---exclude-dir=bower_components --exclude-dir=.venv --exclude-dir=venv --exclude-dir=env
+---exclude-dir=site-packages --exclude-dir=__pycache__ --exclude-dir=.tox --exclude-dir=.mypy_cache
+---exclude-dir=dist --exclude-dir=build --exclude-dir=target --exclude-dir=out
+---exclude-dir=vendor --exclude-dir=.next --exclude-dir=.nuxt --exclude-dir=coverage
+---exclude-dir=.vvaharness --exclude=SKILL.md --exclude=probe.sh"
+-
+-TPL="--include=*.html --include=*.htm --include=*.xhtml --include=*.shtml
+---include=*.jinja --include=*.jinja2 --include=*.j2 --include=*.twig --include=*.liquid
+---include=*.erb --include=*.haml --include=*.slim --include=*.rhtml
+---include=*.ejs --include=*.eta --include=*.hbs --include=*.handlebars --include=*.mustache
+---include=*.njk --include=*.nunjucks --include=*.pug --include=*.jade --include=*.marko
+---include=*.jsp --include=*.jspx --include=*.jspf --include=*.tag --include=*.ftl --include=*.vm
+---include=*.cshtml --include=*.vbhtml --include=*.razor --include=*.aspx --include=*.ascx
+---include=*.master --include=*.blade.php --include=*.phtml
+---include=*.vue --include=*.svelte --include=*.astro
+---include=*.tmpl --include=*.tpl --include=*.gohtml --include=*.mako --include=*.mak"
+-
+-SRC="--include=*.py --include=*.js --include=*.jsx --include=*.mjs --include=*.cjs
+---include=*.ts --include=*.tsx --include=*.rb --include=*.go --include=*.java --include=*.kt
+---include=*.cs --include=*.vb --include=*.php --include=*.pl --include=*.ex --include=*.exs
+---include=*.config --include=*.xml --include=*.json --include=*.yaml --include=*.yml
+---include=*.cfg --include=*.ini --include=*.toml"
+-
+-sec() {
+-	echo ""
+-	echo "== $1 =="
+-}
+-
+-# Normalise whitespace and clip long lines: minified template lines must not flood the output.
+-norm() {
+-	sed 's/[	 ][	 ]*/ /g' | cut -c1-170
+-}
+-
+-# Drop duplicate hits from batteries whose patterns overlap; order by file then line number.
+-dedup() {
+-	sort -t: -k1,1 -k2,2n -u
+-}
+-
+-# Read matches on stdin, print at most $1 of them, print "(none)" when there were none.
+-emit() {
+-	cap=$1
+-	data=$(head -n 3000)
+-	if [ -z "$data" ]; then
+-		echo "(none)"
+-		return 0
+-	fi
+-	total=$(printf '%s\n' "$data" | wc -l | tr -d ' ')
+-	printf '%s\n' "$data" | head -n "$cap"
+-	if [ "$total" -gt "$cap" ]; then
+-		echo "... $total matches, showing first $cap"
+-	fi
+-	return 0
+-}
+-
+-# Walk the tree for template files once; three sections below reuse the list.
+-TPL_FILES=$(grep -rlE '^' $SKIP $TPL -- "$ROOT" 2>/dev/null | head -n 5000)
+-
+-tpl_files() {
+-	[ -n "$TPL_FILES" ] && printf '%s\n' "$TPL_FILES"
+-	return 0
+-}
+-
+-# grep the template tree for an ERE; $2=-i for case-insensitive
+-tgrep() {
+-	grep -rEn $2 $SKIP $TPL -e "$1" -- "$ROOT" 2>/dev/null || true
+-}
+-
+-# grep the host source tree for an ERE
+-sgrep() {
+-	grep -rEn $2 $SKIP $SRC -e "$1" -- "$ROOT" 2>/dev/null || true
+-}
+-
+-echo "== TEMPLATE/VIEW PROBE: root=$ROOT =="
+-
+-sec "TEMPLATE INVENTORY (non-empty files, by extension)"
+-tpl_files | awk -F/ '{n=split($NF,p,"."); print "."p[n]}' \
+-	| awk '{c[$1]++; t++} END{for (k in c) printf "%6d  %s\n", c[k], k; if (t) printf "%6d  TOTAL template files\n", t}' \
+-	| sort -rn | emit 45
+-
+-sec "LAYOUTS / PARTIALS / FRAGMENTS — READ THESE BEFORE ANY LEAF PAGE"
+-tpl_files \
+-	| grep -Ei '(^|/)(_?base|_?layout|_?master|_?application|_?default|_?main|_?shell|_?wrapper|_?head|_?nav|_?footer|_?header)[^/]*$|/(partials?|fragments?|includes?|shared|components|macros)/' \
+-	| norm | emit 40
+-
+-sec "AUTOESCAPE OFF / UNSAFE ENGINE CONFIG -- a bare jinja2.Environment() defaults to autoescape OFF, and select_autoescape(enabled_extensions=('html',)) leaves .txt/.jinja unescaped"
+-{
+-	tgrep 'autoescape[^>%}]{0,12}(false|off)' -i
+-	sgrep 'autoescape[[:space:]]*[=:][[:space:]]*(false|0|None)|jinja2?\.Environment\(|Environment\(loader|select_autoescape|nunjucks\.configure|Handlebars\.compile|new[[:space:]]+Twig|escape[[:space:]]*[=:][[:space:]]*false|escapeXml[^>]{0,12}false|escapeHtml[^>]{0,12}false|ValidateRequest[^>]{0,12}false' -i
+-	tgrep 'escapeXml[^>]{0,12}false|escapeHtml[^>]{0,12}false|ValidateRequest[^>]{0,12}false' -i
+-} | dedup | norm | emit 45
+-
+-sec "UNESCAPED OUTPUT MARKERS IN TEMPLATES (safe/raw/triple-stash/utext)"
+-tgrep '\|[[:space:]]*(safe|raw|n)[[:space:]]*[}%|]|\{\{\{|\{\{&|<%-|<%==|<%=[[:space:]]*raw|\.html_safe|th:utext|\[\(\$\{|\[\[\$\{|@Html\.Raw|Html\.Raw\(|MvcHtmlString|HtmlString|\{@html|v-html|dangerouslySetInnerHTML|\[innerHTML\]|innerHTML[[:space:]]*=|outerHTML[[:space:]]*=|insertAdjacentHTML|document\.write|Handlebars\.SafeString|mark_safe|SafeString|Markup\(|\{!![[:space:]]|\{%[[:space:]]*filter[[:space:]]+safe' \
+-	| norm | emit 70
+-
+-sec "UNESCAPED OUTPUT MARKERS IN HOST CODE (mark_safe / Markup / SafeString / Trust bypass)"
+-sgrep 'mark_safe|SafeString|markupsafe|Markup\(|format_html\(|\.html_safe|Handlebars\.SafeString|bypassSecurityTrust(Html|Url|Script|Style|ResourceUrl)|dangerouslySetInnerHTML|innerHTML[[:space:]]*=|insertAdjacentHTML|document\.write\(|template\.(HTML|JS|URL|HTMLAttr|CSS)\(|Html\.Raw|new[[:space:]]+HtmlString' \
+-	| norm | emit 60
+-
+-sec "MACRO KWARGS THAT MARK A COLUMN SAFE -- the {{value|safe}} sink sits in a vendored package template, not in this repo, so grepping |safe here never finds it"
+-{
+-	sgrep 'safe_columns|render_table\(|render_field\(|\|safe'
+-	tgrep 'safe_columns|render_table\(|bootstrap[0-9]?/table'
+-} | dedup | norm | emit 30
+-
+-sec "SSTI — TEMPLATE SOURCE BUILT AT RUNTIME (CWE-1336, a separate finding from XSS)"
+-sgrep 'render_template_string|Template\([^)]*(\+|%|format|f["]|request|input|param)|from_string\(|env\.from_string|Twig.*createTemplate|new[[:space:]]+Template\(|template\.New\([^)]*Parse|eval_template' \
+-	| norm | emit 30
+-
+-sec "URL-CONTEXT INTERPOLATION (needs a scheme allow-list; HTML-escaping does nothing here)"
+-tgrep '(href|src|srcset|action|formaction|poster|cite|data|background|xlink:href|ng-href|:href|:src|th:href|th:src|location(\.href)?|window\.open)[[:space:]]*=[[:space:]]*[^>]{0,60}(\{\{|\{%|<%|\$\{|#\{|\[\[\$|\[\(\$)' \
+-	| norm | emit 60
+-
+-sec "EVENT-HANDLER-CONTEXT INTERPOLATION (attribute body is JS; HTML entities decode first)"
+-tgrep '(on[a-z]{3,20}|th:on[a-z]+|v-on:[a-z]+|@(click|input|change|submit|error|load))[[:space:]]*=[[:space:]]*[^>]{0,60}(\{\{|\{%|<%|\$\{|#\{|\[\[\$|\[\(\$)' \
+-	| norm | emit 45
+-
+-sec "SCRIPT-CONTEXT INTERPOLATION (inside <script>; needs tojson / json_script / template.JS)"
+-SCRIPT_AWK=$(cat <<'AWK'
+-FNR == 1 { ins = 0 }
+-{
+-	l = tolower($0)
+-	interp = (l ~ /(\{\{|\{%[[:space:]]*(if|for|print)|<%[=-]|\$\{|#\{|\[\[\$|\[\(\$)/)
+-	opens_here = (l ~ /<script/)
+-	if (interp && (ins > 0 || opens_here)) {
+-		enc = (l ~ /tojson|json_script|json\.stringify|escapejs|template\.js|jsonify|jsonencode|\|[[:space:]]*e[[:space:]]*[}|]/) ? "ENCODED?" : "RAW"
+-		s = $0
+-		gsub(/[	 ][	 ]*/, " ", s)
+-		printf "%s:%d: [%s] %s\n", FILENAME, FNR, enc, substr(s, 1, 150)
+-	}
+-	ins = ins + gsub(/<script/, "&", l) - gsub(/<\/script/, "&", l)
+-	if (ins < 0) { ins = 0 }
+-}
+-AWK
+-)
+-tpl_files | while IFS= read -r f; do
+-	[ -n "$f" ] && awk "$SCRIPT_AWK" "$f" 2>/dev/null
+-done | emit 45
+-
+-sec "UNQUOTED-ATTRIBUTE / CSS-CONTEXT INTERPOLATION (a space starts a new attribute)"
+-{
+-	tgrep '[a-zA-Z_:-]+=(\{\{|\{%|<%|\$\{|#\{)'
+-	tgrep 'style[[:space:]]*=[[:space:]]*[^>]{0,60}(\{\{|<%|\$\{|#\{)'
+-	tgrep '<style[^>]*>.*(\{\{|<%|\$\{|#\{)'
+-} | dedup | norm | emit 40
+-
+-sec "GO TEXT/TEMPLATE (does no escaping at all) AND TYPE-CAST RE-OPENS"
+-sgrep 'text/template|html/template|template\.(HTML|JS|URL|HTMLAttr|CSS|Srcset)\(' | norm | emit 25
+-
+-sec "FORMS: CSRF TOKEN FIELD PRESENT INSIDE EACH FORM?"
+-FORM_AWK=$(cat <<'AWK'
+-BEGIN { Q = "[" sprintf("%c", 34) sprintf("%c", 39) "]" }
+-FNR == 1 { if (inform) { flush_form() } ; inform = 0 }
+-{
+-	l = tolower($0)
+-	gsub(Q, "", l)
+-	rest = l
+-	while (1) {
+-		if (!inform) {
+-			p = index(rest, "<form")
+-			if (p == 0) { break }
+-			inform = 1
+-			startline = FNR
+-			buf = ""
+-			rest = substr(rest, p)
+-		}
+-		q = index(rest, "</form")
+-		if (q == 0) { buf = buf " " rest; break }
+-		buf = buf " " substr(rest, 1, q - 1)
+-		flush_form()
+-		inform = 0
+-		rest = substr(rest, q + 6)
+-	}
+-}
+-END { if (inform) { flush_form() } }
+-function flush_form() {
+-	verb = "GET/UNSPECIFIED"
+-	if (buf ~ /method[ ]*=[ ]*(post|put|delete|patch)/) { verb = "STATE-CHANGING" }
+-	tok = "NO-TOKEN"
+-	if (buf ~ /csrf|xsrf|authenticity_token|antiforgerytoken|hidden_tag|_token|requestverificationtoken/) { tok = "token-present" }
+-	act = "?"
+-	if (match(buf, /action[ ]*=[ ]*[^ >]+/)) { act = substr(buf, RSTART, RLENGTH) }
+-	printf "%s:%d: %s %s (%s)\n", FILENAME, startline, verb, tok, act
+-	forms++
+-}
+-AWK
+-)
+-FORMS=$(grep -rlE '<[Ff][Oo][Rr][Mm]' $SKIP $TPL -- "$ROOT" 2>/dev/null | while IFS= read -r f; do
+-	[ -n "$f" ] && awk "$FORM_AWK" "$f" 2>/dev/null
+-done | sort -t: -k1,1 -k2,2n | head -n 2000)
+-echo "-- verdict counts over every form found --"
+-printf '%s\n' "$FORMS" | grep -E 'TOKEN|token' \
+-	| awk '{c[$2" "$3]++} END{for (k in c) printf "%6d  %s\n", c[k], k}' | sort -rn | emit 10
+-echo "-- forms with NO token field inside the <form>...</form> span --"
+-printf '%s\n' "$FORMS" | grep -E 'NO-TOKEN' | emit 60
+-
+-sec "FORM HELPERS THAT EMIT A TOKEN THEMSELVES (Rails form_with, hidden_tag, form_tag)"
+-{
+-	tgrep 'form_with|form_for|form_tag|hidden_tag|csrf_meta_tags|@Html\.BeginForm|\{%[[:space:]]*csrf_token'
+-	sgrep 'form_with|form_for|form_tag|hidden_tag'
+-} | dedup | norm | emit 25
+-
+-sec "CSRF MACHINERY PRESENT REPO-WIDE (zero hits ⇒ EVERY state-changing form is CWE-352)"
+-{
+-	grep -rEn $SKIP $TPL $SRC -e 'CSRFProtect|WTF_CSRF|csrf_token|csrfmiddlewaretoken|CsrfViewMiddleware|authenticity_token|protect_from_forgery|AntiForgeryToken|ValidateAntiForgeryToken|csurf|X-CSRF-Token|X-XSRF-TOKEN|csrf-token|_csrf|CsrfTokenRepository|SameSite' -- "$ROOT" 2>/dev/null || true
+-} | dedup | norm | emit 35
+-echo "-- form base classes (wtforms.Form has no token; flask_wtf.FlaskForm does) --"
+-sgrep 'class[[:space:]]+[A-Za-z_]+\((wtforms\.)?(Form|FlaskForm|ModelForm|forms\.Form)\)|from[[:space:]]+flask_wtf|import[[:space:]]+FlaskForm|Flask-WTF|flask-wtf' | norm | emit 25
+-
+-sec "INFO DISCLOSURE: EXCEPTION / DEBUG OBJECTS RENDERED (CWE-209)"
+-tgrep '(\{\{|\{%|<%[=-]|\$\{|#\{)[^}%]{0,40}\b(error|errors|exception|exc|traceback|stack|stacktrace|stack_trace|detailed_message|debug_info|sql|query|e\.message|err\.message)\b|@Model\.Exception|Server\.GetLastError|<%=[[:space:]]*e\.' -i \
+-	| norm | emit 40
+-
+-sec "INFO DISCLOSURE: CONFIG / SECRETS / HIDDEN FIELDS SHIPPED TO THE CLIENT (CWE-200/540)"
+-{
+-	tgrep '(\{\{|\{%|<%[=-]|\$\{|#\{)[^}%]{0,40}\b(config|settings|environ|secret_key|secret|password|passwd|token|api_key|apikey|private_key|access_key|session|is_admin|is_staff|role|permissions|internal)\b' -i
+-	tgrep '<input[^>]*type[^>]{0,12}(hidden|password)[^>]*value[[:space:]]*='
+-	tgrep '<!--[^>]{0,120}(\{\{|<%|\$\{|#\{|TODO|FIXME|password|secret|internal)' -i
+-	tgrep 'data-[a-z-]+[[:space:]]*=[[:space:]]*[^>]{0,40}(user_id|userid|email|is_admin|role|token|secret)' -i
+-} | dedup | norm | emit 50
+-
+-sec "DEBUG MODE / STACKTRACE EXPOSURE IN CONFIG (turns any error page into CWE-209)"
+-sgrep 'debug[[:space:]]*[=:][[:space:]]*(True|true|1)|FLASK_DEBUG|app\.run\([^)]*debug|DEBUG_PROPAGATE|traceback\.(format_exc|print_exc)|customErrors[^>]{0,20}Off|UseDeveloperExceptionPage|consider_all_requests_local|show_exceptions|ASPNETCORE_ENVIRONMENT[^ ]{0,20}Development|config\.consider' \
+-	| norm | emit 35
+-
+-sec "SANITIZERS AND ENCODERS PRESENT (refutation candidates — name the one on the write path)"
+-{
+-	sgrep 'bleach\.|nh3\.|DOMPurify|sanitize_html|sanitizeHtml|HtmlSanitizer|OWASP|Sanitizers\.|html\.escape|escape\(|cgi\.escape|htmlspecialchars|ERB::Util|CGI\.escapeHTML|\|tojson|json_script|escapejs|ValidationError|validators\.URL|urlparse|allowed_schemes'
+-	tgrep '\|[[:space:]]*(e|escape|forceescape|tojson|urlencode|striptags)\b|json_script|escapejs|fn:escapeXml|<c:out'
+-} | dedup | norm | emit 40
+-
+-sec "RENDER CALL SITES (template name -> route that supplies the kwargs)"
+-sgrep 'render_template\(|render_template_string\(|render_to_string|render_to_response|res\.render\(|\.render\([^)]*(html|hbs|ejs|pug|jinja|twig|erb)|template\.Execute|ExecuteTemplate|c\.HTML\(|View\([^)]|return[[:space:]]+view\(|@Controller|@RenderPage' \
+-	| norm | emit 50
+-
+-sec "CONTENT SECURITY POLICY (lowers severity; does not refute URL/attribute context)"
+-{
+-	sgrep 'Content-Security-Policy|unsafe-inline|unsafe-eval|script-src|nonce|Talisman|helmet'
+-	tgrep 'Content-Security-Policy|http-equiv[^>]{0,20}Content-Security'
+-} | dedup | norm | emit 25
+-
+-echo ""
+-echo "== END OF PROBE (sections printing (none) are themselves findings) =="
+-exit 0
