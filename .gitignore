@@ -12,3 +12,6 @@ failure-mode-paper/
 
 # CyberGym-E2E task data (Hugging Face)
 data/
+
+# Local caches (e.g. the deepsec clone the adapter archives from)
+.cache/

@@ -59,12 +59,13 @@ def bundle(tmp_path_factory):
     # Hand-off: PoC crosses find -> grade (between the two calls).
     (run_dir / "harness" / "run_000").mkdir(parents=True)
     (run_dir / "harness" / "run_000" / "poc.bin").write_bytes(b"\x00poc")
-    (run_dir / "harness" / "handoffs" / "01-poc").mkdir(parents=True)
-    (run_dir / "harness" / "handoffs" / "01-poc" / "poc.bin").write_bytes(b"\x00poc")
+    (run_dir / "state" / "harness" / "01-poc").mkdir(parents=True)
+    (run_dir / "state" / "harness" / "01-poc" / "poc.bin").write_bytes(b"\x00poc")
     (run_dir / "handoffs.jsonl").write_text(json.dumps({
-        "seq": 1, "label": "poc", "from_role": "find", "to_role": "grade", "ts": t + 5,
-        "note": "PoC bytes to the grader",
-        "files": [{"name": "poc.bin", "path": "harness/handoffs/01-poc/poc.bin"}]}) + "\n")
+        "step_type": "handoff", "role": "find", "summary": "PoC bytes to the grader", "t": t + 5,
+        "stage": "poc",
+        "state_ref": {"seq": 1, "label": "poc", "from_role": "find", "to_role": "grade",
+                      "files": [{"name": "poc.bin", "path": "state/harness/01-poc/poc.bin"}]}}) + "\n")
 
     # Oracle: the grader re-ran the PoC.
     (run_dir / "oracle_runs.jsonl").write_text(json.dumps({

@@ -170,6 +170,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     workdir = run_dir / "harness"
     workdir.mkdir()
     batch = None
+    agent_tag = None
     error = None
     events = isolation.ContainerEventLog(run_dir)
     events.start()
@@ -179,7 +180,7 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         fuzzer = _fuzzer_name(task)
         target_dir, target_image = _write_target_dir(workdir, compiled, repo, fuzzer)
         subprocess.run(["docker", "build", "-t", target_image, str(target_dir)], check=True, capture_output=True)
-        _prebuild_agent_image(py, harness_src, target_image, run_dir)
+        agent_tag = _prebuild_agent_image(py, harness_src, target_image, run_dir)
 
         env = {**os.environ,
                "VULN_PIPELINE_AGENT_RUNTIME": "runsc",
@@ -213,6 +214,15 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     except Exception as e:  # recorded, not swallowed
         error = repr(e)
     finally:
+        # A phase killed by its timeout leaves its agent container running
+        # (the harness removes it only on a clean exit): tear down every
+        # container of this run's agent image before the event log stops.
+        if agent_tag:
+            ids = subprocess.run(["docker", "ps", "-aq", "--filter", f"ancestor={agent_tag}"],
+                                 capture_output=True, text=True).stdout.split()
+            if ids:
+                subprocess.run(["docker", "rm", "-f", *ids], capture_output=True)
+                meta["containers_torn_down"] = len(ids)
         events.stop()
 
     findings = []

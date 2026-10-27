@@ -16,6 +16,8 @@ REPO = Path(os.environ.get("PILOT_HOME") or CODE).resolve()
 SYSTEMS = CODE / "systems"  # system adapter files live with the code (this worktree)
 CYBERGYM = REPO / "vendor" / "cybergym-e2e"
 CYBERGYM_SCRIPTS = CYBERGYM / "scripts"
+# The proxy writes each run's log under the runs folder it has mounted; a
+# worktree that shares the running proxy sets PILOT_RUNS_DIR to that folder.
 RUNS = Path(os.environ.get("PILOT_RUNS_DIR") or REPO / "runs")
 # A second proxy stack (another worktree, a demo) can run beside the shared
 # one under its own compose project and port; the defaults are the shared stack.

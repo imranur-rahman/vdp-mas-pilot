@@ -5,12 +5,20 @@ import argparse
 import json
 from pathlib import Path
 
-from . import claims, coding, exporter, infra, isolation, runner
+from . import claims, coding, deepsec_run, exporter, infra, isolation, runner
 from .adapters import harness_run
 
 
 RUNS = {"claude-code": runner.run_claude_code, "claude-code-runner": runner.run_claude_code_in_runner,
-        "anthropic-harness": harness_run.run}
+        "deepsec": deepsec_run.run_deepsec, "anthropic-harness": harness_run.run}
+
+
+def _run_vvah(*args):
+    from .adapters import vvah
+    return vvah.run(*args)
+
+
+RUNS["visa-vvah"] = _run_vvah
 
 
 def main():
@@ -26,8 +34,8 @@ def main():
         isolation.probe_runner_network(infra.ensure_firewall(), a.image), indent=2)))
 
     run = sub.add_parser("run", help="run one system on one task")
-    run.add_argument("system", choices=list(RUNS),
-                     help="claude-code: in the task container; claude-code-runner: in a runner container;"
+    run.add_argument("system", choices=sorted(RUNS),
+                     help="claude-code / claude-code-runner / visa-vvah / deepsec in/near the task container;"
                           " anthropic-harness: on the host, agents in gVisor on cybergym-internal")
     run.add_argument("task", help="CyberGym-E2E task, e.g. md4c/arvo_31332")
     run.add_argument("--kind", choices=["dev", "data"], required=True)

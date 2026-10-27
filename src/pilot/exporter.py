@@ -1,13 +1,17 @@
 """Exporter: a run folder goes in, a trajectory bundle comes out (ADR 0001).
 
 Reads only the run folder: `run.json`, the raw proxy log (`proxy.jsonl`, or
-`proxy.jsonl.gz` in test fixtures), and CyberGym's output under `cybergym/`.
+`proxy.jsonl.gz` in test fixtures), CyberGym's output under `cybergym/`, and
+what an adapter's collector wrote: `role_windows.json` (when each role made
+its calls, for systems with no per-role key), `handoffs.jsonl` (hand-offs and
+code decisions, with references to the state captured there) and `state/`.
 Never Phoenix. The bundle is written to `<run folder>/bundle/`:
 
 - `steps.jsonl`: one step record per line (docs/DECISIONS.md, Step record)
 - `run.json`: the run's metadata and outcome
 - `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once;
   `prompts/claim-extraction-*.json`: the prompt that extracted the claims
+- `state/`: the state captured at each hand-off (collector output, copied)
 - `oracle/`: the PoC and patch each CyberGym validation checked, and the task's
   known patch (`oracle/ground_truth.patch`)
 - `findings.json`: normalized findings with their `tp_target` checks (verdicts.py)
@@ -75,15 +79,14 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
     base = {"run_id": run["run_id"], "task_id": run["task"], "system": run["system"]}
 
     records = load_proxy_log(run_dir)
-    llm = _llm_steps(records, bundle)
-    # Adapter-supplied steps that are anchored in time (hand-offs and a system's
-    # own grader re-runs) interleave with the model calls; CyberGym's validation
-    # runs after the whole run, so its oracle steps go at the end.
-    timed = _handoff_steps(run_dir, bundle) + _collector_oracle_steps(run_dir, bundle)
+    llm = _llm_steps(records, bundle, _load_json(run_dir / "role_windows.json") or [])
     attempts, oracle = _oracle_steps(run_dir, bundle)
     iteration = attempts[-1] if attempts else 1
-    steps = [{**_empty_step(), **base, "iteration": iteration, **s}
-             for s in _merge_by_time(llm, timed)]
+    # Hand-offs and a system's own grader re-runs are anchored in time and
+    # interleave with the model calls; CyberGym's validation runs after the
+    # whole run, so its oracle steps go at the end.
+    agent_steps = _with_handoffs(llm, _handoff_steps(run_dir, bundle) + _collector_oracle_steps(run_dir, bundle))
+    steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in agent_steps]
     steps += [{**_empty_step(), **base, **s} for s in oracle]
     for seq, s in enumerate(steps, 1):
         s["seq"] = seq
@@ -109,31 +112,35 @@ def _empty_step() -> dict:
 
 # --- model calls ---------------------------------------------------------------
 
-def _llm_steps(records: list[dict], bundle: Path) -> list[dict]:
+def _llm_steps(records: list[dict], bundle: Path, role_windows: list[dict] = ()) -> list[dict]:
     streams = {r["litellm_call_id"]: r for r in records if r.get("record") == "stream"}
+    requests = {r["litellm_call_id"]: r.get("body") or {} for r in records if r.get("record") == "request"}
     calls = [r for r in records if r.get("record") == "call"]
-    seen_by_agent: dict[str, list] = {}   # agent -> normalized messages of its last call
+    instances: dict[str, list] = {}  # role:prompt -> [[agent instance, messages of its last call]]
     pending_tool_calls: dict[str, dict] = {}  # tool_use id -> tool call awaiting a result
     steps = []
 
     for i, call in enumerate(calls):
         pilot = call.get("pilot") or {}
-        request = call.get("upstream_request") or {}
+        request = _request_of(call, requests)
         prompt_id = pilot.get("pilot_prompt_hash")
+        ts_start, ts_end = _ts(call.get("start_time")), _ts(call.get("end_time"))
         role = pilot.get("pilot_role")
-        agent = f"{role or pilot.get('pilot_system') or 'agent'}:{prompt_id}"
+        role_source = "per_role_key" if role else None
+        if role is None and role_windows:
+            role = _role_at(role_windows, ts_start)
+            role_source = "stage_window" if role else None
         _save_prompt(bundle, prompt_id, request)
 
         raw = request.get("messages") or []
         messages = normalize_messages(raw)
-        earlier = seen_by_agent.get(agent)
-        if earlier is not None and messages[:len(earlier)] == earlier:
+        agent, earlier = _agent_instance(
+            instances, f"{role or pilot.get('pilot_system') or 'agent'}:{prompt_id}", messages)
+        if earlier is not None:
             delta, prefix_hash = messages[len(earlier):], _hash(earlier)
         else:
             delta, prefix_hash = messages, None
-        seen_by_agent[agent] = messages
 
-        ts_start, ts_end = _ts(call.get("start_time")), _ts(call.get("end_time"))
         for m in delta:
             for block in m["content"]:
                 if block.get("type") == "tool_result" and block.get("tool_use_id") in pending_tool_calls:
@@ -160,6 +167,7 @@ def _llm_steps(records: list[dict], bundle: Path) -> list[dict]:
             "step_type": "refusal" if refused else "llm_step",
             "agent_instance_id": agent,
             "role": role,
+            "role_source": role_source,
             "input_delta": delta,
             "input_prefix_hash": prefix_hash,
             "output": text or None,
@@ -184,6 +192,64 @@ def _llm_steps(records: list[dict], bundle: Path) -> list[dict]:
             "_agent": agent,
         })
     return steps
+
+
+def _request_of(call: dict, requests: dict[str, dict]) -> dict:
+    """The request a call carried. LiteLLM logs no `complete_input_dict` for
+    non-streamed /v1/messages calls; the proxy then writes a `request` record.
+    Logs from before that record keep only the messages and tools, in LiteLLM's
+    own logging object."""
+    if call.get("upstream_request"):
+        return call["upstream_request"]
+    if call.get("litellm_call_id") in requests:
+        return requests[call["litellm_call_id"]]
+    slo = call.get("standard_logging_object") or {}
+    if not slo.get("messages"):
+        return {}
+    return {"messages": slo["messages"], "tools": (slo.get("model_parameters") or {}).get("tools"),
+            "system": None, "_source": "standard_logging_object (system prompt not logged)"}
+
+
+def _role_at(windows: list[dict], t: float | None) -> str | None:
+    if t is None:
+        return None
+    for w in windows:
+        if w["start"] <= t <= w["end"]:
+            return w["role"]
+    return None
+
+
+def _agent_instance(instances: dict, key: str, messages: list) -> tuple[str, list | None]:
+    """The running instance of an agent that made this call: the one whose last
+    call's messages are the longest prefix of this call's, so parallel sessions
+    with one prompt stay apart. No match starts a new instance (`key`, `key#2`, ...).
+
+    Returns the instance and the messages of its previous call (None if new).
+    """
+    known = instances.setdefault(key, [])  # [name, messages of its last call, their canonical form]
+    canon = [_canonical(m) for m in messages]
+    best = None
+    for n, (_, last, last_canon) in enumerate(known):
+        if canon[:len(last_canon)] == last_canon and (best is None or len(last_canon) > len(known[best][2])):
+            best = n
+    if best is None:
+        name = key if not known else f"{key}#{len(known) + 1}"
+        known.append([name, messages, canon])
+        return name, None
+    name, earlier, _ = known[best]
+    known[best][1:] = [messages, canon]
+    return name, earlier
+
+
+def _canonical(message: dict) -> dict:
+    """A message for matching only: a tool result given as a plain string equals
+    the same text as one text block (DeepAgents resends results in either form)."""
+    content = []
+    for block in message.get("content") or []:
+        if block.get("type") == "tool_result" and isinstance(block.get("content"), str):
+            block = {**block, "content": [{"type": "text", "text": block["content"]}]}
+        content.append(block)
+    return {**message, "content": content}
 
 
 def normalize_messages(messages: list[dict]) -> list[dict]:
@@ -322,32 +388,26 @@ def _link_parents(steps: list[dict]) -> None:
             s["parent_step_id"] = last_llm
 
 
-# --- collector hand-offs and grader re-runs -----------------------------------
+# --- hand-offs and code decisions ---------------------------------------------
 
 def _handoff_steps(run_dir: Path, bundle: Path) -> list[dict]:
-    """One `handoff` step per record in a collector's `handoffs.jsonl`: a state
-    hand-off from one agent to the next. The hand-off files are copied so the
-    bundle stands alone."""
+    """One `handoff` or `code_decision` step per record in the run folder's
+    `handoffs.jsonl` (an adapter's collector output). The captured state is
+    copied into the bundle's `state/`; `state_ref` paths name those copies."""
     path = run_dir / "handoffs.jsonl"
     if not path.exists():
         return []
+    if (run_dir / "state").is_dir():
+        shutil.copytree(run_dir / "state", bundle / "state", dirs_exist_ok=True)
     steps = []
-    for line in path.read_text().splitlines():
-        if not line.strip():
-            continue
-        h = json.loads(line)
-        for f in h.get("files") or []:
-            src = run_dir / f["path"]
-            if src.is_file():
-                (bundle / f["path"]).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(src, bundle / f["path"])
+    for h in (json.loads(l) for l in path.read_text().splitlines() if l.strip()):
         steps.append({
-            "step_type": "handoff",
-            "role": h.get("from_role"),
-            "output": h.get("note"),
-            "ts_start": h.get("ts"),
-            "ts_end": h.get("ts"),
-            "state_ref": {k: h.get(k) for k in ("seq", "label", "from_role", "to_role", "files", "note")},
+            "step_type": h.get("step_type") or "handoff",
+            "role": h.get("role"),
+            "output": h.get("summary"),
+            "ts_start": h.get("t"),
+            "ts_end": h.get("t"),
+            "state_ref": {**(h.get("state_ref") or {}), "stage_label": h.get("stage")},
         })
     return steps
 
@@ -415,15 +475,21 @@ def _join_transcripts(run_dir: Path, bundle: Path, steps: list[dict]) -> list[di
     return index
 
 
-def _merge_by_time(primary: list[dict], extra: list[dict]) -> list[dict]:
-    """Each extra (time-anchored) step goes before the first primary step that
-    started after it. Extras with no timestamp sort to the front."""
-    out, pending = [], sorted(extra, key=lambda s: s["ts_start"] if s["ts_start"] is not None else -1)
-    for s in primary:
-        while pending and s["ts_start"] is not None and (pending[0]["ts_start"] or -1) <= s["ts_start"]:
+def _with_handoffs(llm: list[dict], handoffs: list[dict]) -> list[dict]:
+    """Hand-offs placed among model calls by time: before the first call that
+    started after them. Model calls keep their order."""
+    if not handoffs:
+        return llm
+    out, pending = [], sorted(handoffs, key=lambda h: h["ts_start"] or 0)
+    for s in llm:
+        while pending and s["ts_start"] is not None and (pending[0]["ts_start"] or 0) <= s["ts_start"]:
             out.append(pending.pop(0))
         out.append(s)
     return out + pending
+
+
+def _load_json(path: Path):
+    return json.loads(path.read_text()) if path.exists() else None
 
 
 # --- CyberGym validation ------------------------------------------------------
@@ -438,12 +504,14 @@ def _oracle_steps(run_dir: Path, bundle: Path) -> tuple[list[int], list[dict]]:
     for summary_path in sorted((run_dir / "cybergym").glob("*/*/summary.json")):
         summary = json.loads(summary_path.read_text())
         out = summary_path.parent / "output"
+        # A run checked per patch (an adapter's `patch_scope`) keeps each scope's files apart.
+        scope = f"{summary['patch_scope']}/" if summary.get("patch_scope") else ""
         for attempt in summary.get("attempts") or []:
             n = attempt.get("attempt", 1)
             attempts.append(n)
-            poc = _copy_first(bundle, f"oracle/attempt_{n}/poc.bin",
+            poc = _copy_first(bundle, f"oracle/{scope}attempt_{n}/poc.bin",
                               out / f"poc_attempt_{n}.bin", out / "poc.bin")
-            patch = _copy_first(bundle, f"oracle/attempt_{n}/fix.patch",
+            patch = _copy_first(bundle, f"oracle/{scope}attempt_{n}/fix.patch",
                                 out / f"fix_attempt_{n}.patch", out / "fix.patch")
             for number, stage in enumerate(CYBERGYM_STAGES, 1):
                 if stage not in attempt:
@@ -459,6 +527,7 @@ def _oracle_steps(run_dir: Path, bundle: Path) -> tuple[list[int], list[dict]]:
                         "poc": poc if "poc" in STAGE_CHECKS[number] else None,
                         "patch": patch if "patch" in STAGE_CHECKS[number] else None,
                         "ground_truth_poc": number == 4,
+                        "patch_scope": summary.get("patch_scope"),
                         "summary": str(summary_path.relative_to(run_dir)),
                     },
                 })
@@ -507,10 +576,14 @@ def render(run: dict, steps: list[dict], bundle: Path | None = None, findings: l
 def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str]) -> list[str]:
     if s["step_type"] == "handoff":
         ref = s["state_ref"] or {}
-        files = ", ".join(_link(f["path"]) for f in ref.get("files") or []) or "none"
-        return [f"## Step {s['seq']} · handoff · {ref.get('label')}:"
-                f" {ref.get('from_role')} -> {ref.get('to_role') or 'end of run'}", "",
-                f"_{_when(s['ts_start'])}_. {ref.get('note') or ''}", "",
+        raw = ref.get("files")
+        if isinstance(raw, list):
+            files = ", ".join(_link(f["path"]) for f in raw if isinstance(f, dict)) or "none"
+        else:  # a capture that records a file count and a diff (pilot.state)
+            files = f"{raw if raw is not None else 'no'} files; diff {_link(ref.get('diff'))}"
+        return [f"## Step {s['seq']} · handoff · {ref.get('label') or ref.get('stage_label')}:"
+                f" {ref.get('from_role') or s.get('role')} -> {ref.get('to_role') or 'end of run'}", "",
+                f"_{_when(s['ts_start'])}_. {s.get('output') or ''}", "",
                 f"- Files: {files}", ""]
     if s["step_type"] == "oracle_run" and (s["oracle_ref"] or {}).get("source") == "harness_grader":
         ref = s["oracle_ref"]

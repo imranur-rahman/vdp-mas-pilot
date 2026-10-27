@@ -75,7 +75,8 @@ def jsonl(path: Path) -> list[dict]:
 def test_handoff_log_names_the_finder_to_grader_poc_handoff(tmp_path):
     run_dir = collected(tmp_path)
     handoffs = jsonl(run_dir / "handoffs.jsonl")
-    poc = next(h for h in handoffs if h["label"] == "poc" and h["to_role"] == "grade")
+    poc = next(h["state_ref"] for h in handoffs
+               if h["state_ref"]["label"] == "poc" and h["state_ref"]["to_role"] == "grade")
     assert poc["from_role"] == "find"
     # the only thing that crosses the trust boundary is the PoC bytes
     assert any(f["name"] == "poc.bin" for f in poc["files"])
@@ -84,16 +85,16 @@ def test_handoff_log_names_the_finder_to_grader_poc_handoff(tmp_path):
 
 def test_found_bugs_and_manifest_are_captured_as_handoffs(tmp_path):
     run_dir = collected(tmp_path)
-    labels = {h["label"] for h in jsonl(run_dir / "handoffs.jsonl")}
+    labels = {h["state_ref"]["label"] for h in jsonl(run_dir / "handoffs.jsonl")}
     assert "found_bugs" in labels
     assert "manifest" in labels
-    fb = next(h for h in jsonl(run_dir / "handoffs.jsonl") if h["label"] == "found_bugs")
+    fb = next(h["state_ref"] for h in jsonl(run_dir / "handoffs.jsonl") if h["state_ref"]["label"] == "found_bugs")
     assert (run_dir / fb["files"][0]["path"]).exists()
 
 
 def test_handoffs_are_ordered_in_pipeline_sequence(tmp_path):
     run_dir = collected(tmp_path)
-    seqs = [h["seq"] for h in jsonl(run_dir / "handoffs.jsonl")]
+    seqs = [h["state_ref"]["seq"] for h in jsonl(run_dir / "handoffs.jsonl")]
     assert seqs == sorted(seqs)
     assert len(set(seqs)) == len(seqs)
 

@@ -156,13 +156,16 @@ def collect(batch: Path, run_dir: Path) -> dict:
         copied = []
         for name, src in files:
             if src and Path(src).is_file():
-                dest_rel = f"harness/handoffs/{len(handoffs) + 1:02d}-{label}/{name}"
+                dest_rel = f"state/harness/{len(handoffs) + 1:02d}-{label}/{name}"
                 dest = run_dir / dest_rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(src, dest)
                 copied.append({"name": name, "path": dest_rel})
-        handoffs.append({"seq": len(handoffs) + 1, "label": label, "from_role": from_role,
-                         "to_role": to_role, "ts": ts, "note": note, "files": copied})
+        # The shared hand-off log schema (ticket 06, exporter._handoff_steps).
+        handoffs.append({"step_type": "handoff", "role": from_role, "summary": note, "t": ts,
+                         "stage": label,
+                         "state_ref": {"seq": len(handoffs) + 1, "label": label, "from_role": from_role,
+                                       "to_role": to_role, "files": copied}})
 
     found_bugs = batch / "found_bugs.jsonl"
     if found_bugs.exists():
