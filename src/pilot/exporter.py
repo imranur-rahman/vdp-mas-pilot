@@ -222,18 +222,30 @@ def _agent_instance(instances: dict, key: str, messages: list) -> tuple[str, lis
 
     Returns the instance and the messages of its previous call (None if new).
     """
-    known = instances.setdefault(key, [])
+    known = instances.setdefault(key, [])  # [name, messages of its last call, their canonical form]
+    canon = [_canonical(m) for m in messages]
     best = None
-    for n, (_, last) in enumerate(known):
-        if messages[:len(last)] == last and (best is None or len(last) > len(known[best][1])):
+    for n, (_, last, last_canon) in enumerate(known):
+        if canon[:len(last_canon)] == last_canon and (best is None or len(last_canon) > len(known[best][2])):
             best = n
     if best is None:
         name = key if not known else f"{key}#{len(known) + 1}"
-        known.append([name, messages])
+        known.append([name, messages, canon])
         return name, None
-    name, earlier = known[best]
-    known[best][1] = messages
+    name, earlier, _ = known[best]
+    known[best][1:] = [messages, canon]
     return name, earlier
+
+
+def _canonical(message: dict) -> dict:
+    """A message for matching only: a tool result given as a plain string equals
+    the same text as one text block (DeepAgents resends results in either form)."""
+    content = []
+    for block in message.get("content") or []:
+        if block.get("type") == "tool_result" and isinstance(block.get("content"), str):
+            block = {**block, "content": [{"type": "text", "text": block["content"]}]}
+        content.append(block)
+    return {**message, "content": content}
 
 
 def normalize_messages(messages: list[dict]) -> list[dict]:
