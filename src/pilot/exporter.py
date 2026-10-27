@@ -6,7 +6,8 @@ Never Phoenix. The bundle is written to `<run folder>/bundle/`:
 
 - `steps.jsonl`: one step record per line (docs/DECISIONS.md, Step record)
 - `run.json`: the run's metadata and outcome
-- `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once
+- `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once;
+  `prompts/claim-extraction-*.json`: the prompt that extracted the claims
 - `oracle/`: the PoC and patch each CyberGym validation checked, and the task's
   known patch (`oracle/ground_truth.patch`)
 - `findings.json`: normalized findings with their `tp_target` checks (verdicts.py)
@@ -20,7 +21,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import stages, verdicts
+from . import claims, stages, verdicts
 
 STEP_FIELDS = (
     "run_id", "task_id", "system", "iteration",
@@ -55,12 +56,14 @@ def load_proxy_log(run_dir: Path) -> list[dict]:
 
 
 def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stages.DEFAULT_MAP,
-           tasks_dir: Path = verdicts.DEFAULT_TASKS) -> Path:
+           tasks_dir: Path = verdicts.DEFAULT_TASKS, extractor: claims.Extractor | None = None) -> Path:
     """Build the trajectory bundle for one run folder and return its path.
 
     `stage_map` is the versioned role-to-stage map joined onto the steps (T-5).
     `tasks_dir` holds each task's `patch.diff` for the `tp_target` checks (F-1),
     used when the run folder has no `ground_truth/patch.diff`.
+    Claims come from the run folder's extraction recording; `extractor` (a live
+    model call, see claims.py) answers only what the recording lacks (T-3).
     """
     run_dir = Path(run_dir)
     bundle = Path(out_dir) if out_dir else run_dir / "bundle"
@@ -82,6 +85,7 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
         s["step_id"] = f"s{seq:04d}"
     _link_parents(steps)
     run = {**run, "stage_map": stages.join_stages(steps, stages.load_map(stage_map))}
+    run["claims"] = claims.extract(steps, run_dir, bundle, extractor)
 
     (bundle / "steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in steps))
     (bundle / "run.json").write_text(json.dumps(run, indent=2))
@@ -413,6 +417,11 @@ def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str])
            f"_{_when(s['ts_start'])}, {s['latency_ms']} ms, model `{s['model']}`, "
            "tokens " + ", ".join(f"{k} {v}" for k, v in (s["tokens"] or {}).items())
            + f", cost ${s['cost_usd']}_", ""]
+    if s["stage"] or s["stage_options"]:
+        out += [f"Stage: {s['stage'] or 'coder chooses one of ' + ', '.join(s['stage_options'])}", ""]
+    if s["claim"]:
+        out += [f"**Claim (extracted by `{s['claim']['model']}`, {s['claim']['prompt']}):** "
+                f"{s['claim']['text'] or 'none'}", ""]
     if s["parent_step_id"]:
         out += [f"Input new since {s['parent_step_id']} (earlier input hash `{s['input_prefix_hash']}`):", ""]
     else:
