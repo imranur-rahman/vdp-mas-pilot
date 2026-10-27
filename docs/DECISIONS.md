@@ -81,6 +81,25 @@ optional replay and fault injection, and an open dataset.
   per the paper). For an agent with two stages, the coder chooses each
   step's stage.
 
+## Model-call handling (grilling round 4, 2026-10-26)
+
+- **M-1 Thinking summaries.** The proxy sets `thinking.display: "summarized"` on
+  every request that has thinking on (adaptive), and skips Sonnet 5.5's
+  `between_tools` mode, where `display` causes a 400. Summaries go in a
+  separate `thinking_summary` step field, marked as model-written summaries,
+  not reasoning. Raw chain of thought is never available, and we do not
+  try to extract it. T1 checks that summaries include the narration between
+  tool calls and that `display` does not change system behavior. The paper's
+  threats to validity notes this.
+- **M-2 Refusals.** No fallback model (P4). Each refusal is a `refusal` step
+  with its `stop_details.category`. A run that ends because of a refusal gets
+  outcome `refused`, kept apart from the "crash or timeout" symptom and left
+  out of failure-mode coding. The refusal rate per system is reported.
+- **M-3 Rejected parameters.** LiteLLM `drop_params` removes only the sampling
+  settings Sonnet 5.5 rejects (`temperature`, `top_p`, `top_k`). Each removal is
+  logged per request. Any other 400 (`budget_tokens`, `thinking: disabled`,
+  forced `tool_choice`) gets the smallest fix under P3(c), as a patch file.
+
 ## Facts for D1 (2026-10-26)
 
 - Default task image `gcr.io/oss-fuzz-base/base-builder@sha256:8eda74a1…`
@@ -140,3 +159,12 @@ AutoCVE `b26025f`, OpenAnt `9143061`, deepsec `4fa6722`.
   `.c/.h/.cc/.cpp`. Untouched by this check, so still open: whether deepsec
   can be pointed at C files at all (`process --filter` only narrows the scan
   candidates), or whether a plugin matcher would have to add them.
+
+## Facts for D8 (2026-10-26)
+
+- CyberGym-E2E languages (from `projects/*/project.toml`, at the shallow clone
+  of HEAD): 139 projects = 42 `c`, 96 `c++`, 1 `swift` (`swift-protobuf`,
+  1 task). Nothing else is in deepsec's supported list, unless its Swift
+  matchers count.
+- The paper's contributions list (`introduction.tex`) still says "six MAS on
+  two benchmarks". The handoff says the team switched to CyberGym-E2E only.
