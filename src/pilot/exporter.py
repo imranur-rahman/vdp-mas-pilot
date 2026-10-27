@@ -8,6 +8,8 @@ Never Phoenix. The bundle is written to `<run folder>/bundle/`:
 - `run.json`: the run's metadata and outcome
 - `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once
 - `oracle/`: the PoC and patch each CyberGym validation checked
+- `state/`: state captured at hand-offs (`manifest.json` plus one diff per capture)
+- `findings.json`: the run's normalized findings, with their `tp_target` checks
 - `trajectory.md`: the run rendered for a human reader
 """
 
@@ -62,7 +64,7 @@ def export(run_dir: Path, out_dir: Path | None = None) -> Path:
     base = {"run_id": run["run_id"], "task_id": run["task"], "system": run["system"]}
 
     records = load_proxy_log(run_dir)
-    llm = _llm_steps(records, bundle)
+    llm = _merge_by_time(_llm_steps(records, bundle), _handoff_steps(run_dir, bundle))
     attempts, oracle = _oracle_steps(run_dir, bundle)
     iteration = attempts[-1] if attempts else 1
     steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in llm]
@@ -74,7 +76,8 @@ def export(run_dir: Path, out_dir: Path | None = None) -> Path:
 
     (bundle / "steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in steps))
     (bundle / "run.json").write_text(json.dumps(run, indent=2))
-    (bundle / "trajectory.md").write_text(render(run, steps, bundle))
+    findings = _findings(run_dir, bundle)
+    (bundle / "trajectory.md").write_text(render(run, steps, bundle, findings))
     return bundle
 
 
@@ -296,8 +299,53 @@ def _link_parents(steps: list[dict]) -> None:
         if agent is not None:
             s["parent_step_id"] = last_of_agent.get(agent)
             last_of_agent[agent] = last_llm = s["step_id"]
-        elif s["step_type"] == "oracle_run":
+        elif s["step_type"] in ("oracle_run", "handoff"):
             s["parent_step_id"] = last_llm
+
+
+# --- hand-offs and findings ---------------------------------------------------
+
+def _handoff_steps(run_dir: Path, bundle: Path) -> list[dict]:
+    """One `handoff` step per state capture (`state/manifest.json`, see
+    pilot.state). The capture diffs are copied so the bundle stands alone."""
+    manifest_path = run_dir / "state" / "manifest.json"
+    if not manifest_path.exists():
+        return []
+    manifest = json.loads(manifest_path.read_text())
+    (bundle / "state").mkdir(exist_ok=True)
+    shutil.copyfile(manifest_path, bundle / "state" / "manifest.json")
+    steps = []
+    for entry in manifest:
+        if (run_dir / entry["diff"]).is_file():
+            shutil.copyfile(run_dir / entry["diff"], bundle / entry["diff"])
+        steps.append({
+            "step_type": "handoff",
+            "role": entry.get("from_role"),
+            "output": entry.get("note"),
+            "ts_start": entry.get("ts"),
+            "ts_end": entry.get("ts"),
+            "state_ref": {k: entry.get(k) for k in ("seq", "label", "diff", "from_role", "to_role",
+                                                     "files", "added", "changed", "removed")},
+        })
+    return steps
+
+
+def _merge_by_time(llm: list[dict], handoffs: list[dict]) -> list[dict]:
+    """Each hand-off goes before the first model call that started after it."""
+    out, pending = [], sorted(handoffs, key=lambda h: h["ts_start"] or 0)
+    for s in llm:
+        while pending and s["ts_start"] is not None and (pending[0]["ts_start"] or 0) <= s["ts_start"]:
+            out.append(pending.pop(0))
+        out.append(s)
+    return out + pending
+
+
+def _findings(run_dir: Path, bundle: Path) -> list[dict] | None:
+    path = run_dir / "findings.json"
+    if not path.exists():
+        return None
+    shutil.copyfile(path, bundle / "findings.json")
+    return json.loads(path.read_text())
 
 
 # --- CyberGym validation ------------------------------------------------------
@@ -357,7 +405,8 @@ STAGE_NAMES = {1: "agent's PoC crashes the unpatched build",
                4: "ground-truth PoC no longer crashes with the patch"}
 
 
-def render(run: dict, steps: list[dict], bundle: Path | None = None) -> str:
+def render(run: dict, steps: list[dict], bundle: Path | None = None,
+           findings: list[dict] | None = None) -> str:
     """The run as Markdown, readable without tools. Long text is cut at
     MAX_BLOCK_CHARS; steps.jsonl keeps it whole."""
     outcome = run.get("outcome") or {}
@@ -369,14 +418,43 @@ def render(run: dict, steps: list[dict], bundle: Path | None = None) -> str:
             f"- Cost (OpenRouter): ${outcome.get('cost_usd_openrouter')}",
             f"- Steps: {len(steps)}. Each model call shows only the input new since that agent's"
             " previous call; system prompts are in `prompts/<prompt_id>.json`.", ""]
+    if run.get("scope_evidence"):
+        out += ["## Scope evidence (D8)", "", _fence(json.dumps(run["scope_evidence"], indent=2), "json"), ""]
     issued_in = {tc["id"]: s["seq"] for s in steps for tc in s["tool_calls"]}
     shown: set[str] = set()  # oracle files already printed in full
     for s in steps:
         out += _render_step(s, issued_in, bundle, shown)
+    if findings is not None:
+        out += _render_findings(findings)
     return "\n".join(out) + "\n"
 
 
+def _render_findings(findings: list[dict]) -> list[str]:
+    out = [f"## Findings ({len(findings)})", "",
+           "Verdicts other than the automatic `tp_target` check are left to coders (ADR 0004).", ""]
+    for f in findings:
+        loc = f.get("location") or {}
+        lines = f"lines {loc['line_start']}-{loc['line_end']}" if loc.get("line_start") else "no lines"
+        function = f", function `{loc['function']}`" if loc.get("function") else ""
+        check = f.get("tp_target_check") or {}
+        out += [f"### {f['finding_id']}: {f.get('title') or ''}", "",
+                f"- Location: `{loc.get('file')}`, {lines}{function}",
+                f"- tp_target check ({check.get('method')}): **{check.get('tp_target')}**"
+                f" (file {check.get('file')}, function {check.get('function')}, lines {check.get('lines')})",
+                f"- The system's own fields: `{json.dumps(f.get('native') or {})}`", "",
+                _fence(_cut(f.get("description") or "")), ""]
+    return out
+
+
 def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str]) -> list[str]:
+    if s["step_type"] == "handoff":
+        ref = s["state_ref"] or {}
+        out = [f"## Step {s['seq']} · handoff · {ref.get('label')}:"
+               f" {ref.get('from_role')} -> {ref.get('to_role') or 'end of run'}", "",
+               f"_{_when(s['ts_start'])}_. State captured: {ref.get('files')} files; added"
+               f" {len(ref.get('added') or [])}, changed {len(ref.get('changed') or [])}, removed"
+               f" {len(ref.get('removed') or [])}. Diff: {_link(ref.get('diff'))}", ""]
+        return out + ([s["output"], ""] if s.get("output") else [])
     if s["step_type"] == "oracle_run":
         ref = s["oracle_ref"] or {}
         out = [f"## Step {s['seq']} · oracle_run · CyberGym stage {ref.get('stage')}"
