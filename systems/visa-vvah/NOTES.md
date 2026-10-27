@@ -11,7 +11,7 @@
 - DeepAgents stages can spawn a read-only general-purpose subagent by default.
 - Native traces: OpenInference tracer for LangChain/DeepAgents.
 
-## Adapter (ticket in `.scratch/tickets/`)
+## Adapter (ticket in `.scratch/pilot/issues/`)
 
 - Run adapter: where it runs (D1) — TBD
 - Output adapter: writes `/output/poc.bin` and `/output/fix.patch`, then calls `run_final_validation`

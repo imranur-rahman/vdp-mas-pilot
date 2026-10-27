@@ -12,7 +12,7 @@
 - (Re-checked at `4fa6722`.) The `claude` backend passes `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` to the Claude Agent SDK (`buildClaudeEnv`). The `codex` backend uses `OPENAI_BASE_URL`, falling back to `ANTHROPIC_BASE_URL`.
 - No matcher targets `.c/.h/.cc/.cpp`. Open: can it analyze C files at all without a plugin matcher?
 
-## Adapter (ticket in `.scratch/tickets/`)
+## Adapter (ticket in `.scratch/pilot/issues/`)
 
 - Run adapter: where it runs (D1) — TBD
 - Output adapter: writes `/output/poc.bin` and `/output/fix.patch`, then calls `run_final_validation`

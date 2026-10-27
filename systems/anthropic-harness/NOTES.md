@@ -11,7 +11,7 @@
 - Subagent tool off (`--tools Read,Write,Bash`).
 - Native traces: Claude Code telemetry and `stream-json` transcripts.
 
-## Adapter (ticket in `.scratch/tickets/`)
+## Adapter (ticket in `.scratch/pilot/issues/`)
 
 - Run adapter: where it runs (D1) — TBD
 - Output adapter: writes `/output/poc.bin` and `/output/fix.patch`, then calls `run_final_validation`

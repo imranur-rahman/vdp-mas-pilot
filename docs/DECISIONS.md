@@ -221,3 +221,10 @@ step stores only `input_delta`; the full request is kept once, in the raw proxy 
   stages; patch only (VVAH) → stages 3–4; PoC only (AutoCVE) → stage 1 and
   a stack trace that overlaps the functions changed in `patch.diff`; report
   only (deepsec) → reported files and functions overlap `patch.diff`.
+
+## Development runs (2026-10-26)
+
+- **B-1** While an adapter is being built, its runs use Claude Haiku 5.5 and are
+  tagged as development runs; they never enter the analysis and count
+  against the $70 reserve. Only each system's single data run uses Sonnet
+  5.5. Spec and tickets: `.scratch/pilot/`.

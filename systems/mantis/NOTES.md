@@ -12,7 +12,7 @@
 - Do not use `--objective` (an LLM then builds a new agent graph).
 - Native traces: OpenTelemetry spans from Google ADK.
 
-## Adapter (ticket in `.scratch/tickets/`)
+## Adapter (ticket in `.scratch/pilot/issues/`)
 
 - Run adapter: where it runs (D1) — TBD
 - Output adapter: writes `/output/poc.bin` and `/output/fix.patch`, then calls `run_final_validation`
