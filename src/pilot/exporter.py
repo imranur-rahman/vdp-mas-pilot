@@ -18,10 +18,12 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import stages
+
 STEP_FIELDS = (
     "run_id", "task_id", "system", "iteration",
     "step_id", "seq", "parent_step_id", "step_type",
-    "agent_instance_id", "role", "stage",
+    "agent_instance_id", "role", "stage", "stage_options",
     "input_delta", "input_prefix_hash",
     "output", "thinking_summary", "tool_calls",
     "prompt_id", "skill", "claim",
@@ -50,8 +52,11 @@ def load_proxy_log(run_dir: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def export(run_dir: Path, out_dir: Path | None = None) -> Path:
-    """Build the trajectory bundle for one run folder and return its path."""
+def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stages.DEFAULT_MAP) -> Path:
+    """Build the trajectory bundle for one run folder and return its path.
+
+    `stage_map` is the versioned role-to-stage map joined onto the steps (T-5).
+    """
     run_dir = Path(run_dir)
     bundle = Path(out_dir) if out_dir else run_dir / "bundle"
     if bundle.exists():
@@ -71,6 +76,7 @@ def export(run_dir: Path, out_dir: Path | None = None) -> Path:
         s["seq"] = seq
         s["step_id"] = f"s{seq:04d}"
     _link_parents(steps)
+    run = {**run, "stage_map": stages.join_stages(steps, stages.load_map(stage_map))}
 
     (bundle / "steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in steps))
     (bundle / "run.json").write_text(json.dumps(run, indent=2))
