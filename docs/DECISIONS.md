@@ -12,7 +12,7 @@ the date, and the reason in place; do not delete the question.
 | D5 | When to snapshot artifacts | **settled** | At every hand-off and at the end of the run; differences between captures for files, a copy of the database file for databases (round 3) |
 | D6 | Model and budget | **settled** | Claude Haiku 5.5 everywhere (P4, ADR 0005; was Sonnet 5.5 until 2026-10-27). Total pilot budget $200: T1 smoke test $10; one run per system at a hard cap of $20 ($120); $70 reserve for re-runs; no repeated runs in the pilot. A capped run ends `budget_exhausted`. Claim extraction (our tooling) uses Claude Haiku 5.5 |
 | D7 | Scoring and false positives | **settled** | Superseded by F-1 below: verdicts per finding, plus step coding in every run |
-| D8 | deepsec and AutoCVE on C/C++ | **pilot decides** | Run all six on the pilot task; a system that produces nothing on C gets outcome `out_of_scope`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
+| D8 | deepsec and AutoCVE on C/C++ | **settled** (2026-10-27, pilot report) | **Both stay in the study.** deepsec generated C matchers and investigated C files (17 findings, 10 in `src/md4c.c`). AutoCVE ran every stage on C and found nothing: outcome `completed` with 0 findings, not `out_of_scope` (that outcome means the system does not support the task's language). Threat to validity: AutoCVE's Semgrep runs offline without its registry rule packs. Evidence: `docs/pilot-report.md`. The paper edit ("two benchmarks" in `introduction.tex`) is left to the authors |
 
 ## Settled principles (grilling round 1, 2026-10-26)
 
@@ -85,7 +85,9 @@ optional replay and fault injection, and an open dataset.
 
 - **M-1 Thinking summaries.** The proxy sets `thinking.display: "summarized"` on
   every request that has thinking on (adaptive), and skips Sonnet 5.5's
-  `between_tools` mode, where `display` causes a 400. Summaries go in a
+  `between_tools` mode, where `display` causes a 400. It overrides any
+  `display` the client sent (deepsec sends `omitted`); the client's own
+  `thinking` is logged as `pilot_client_thinking`. Summaries go in a
   separate `thinking_summary` step field, marked as model-written summaries,
   not reasoning. Raw chain of thought is never available, and we do not
   try to extract it. T1 checks that summaries include the narration between
@@ -182,7 +184,7 @@ step stores only `input_delta`; the full request is kept once, in the raw proxy 
 | `stage` | joined later from `role-stage-map` |
 | `input_delta`, `input_prefix_hash` | proxy JSONL |
 | `output`, `thinking_summary`, `tool_calls[]` (name, args, result, timing) | proxy JSONL, native traces |
-| `prompt_id` (system-prompt hash), `skill` | proxy JSONL, the system's files |
+| `prompt_id` (system-prompt hash, without Claude Code's per-request `x-anthropic-billing-header:` line), `skill` | proxy JSONL, the system's files |
 | `claim` (with the model and prompt that extracted it) | exporter extraction pass (T-3) |
 | `model`, `tokens` (input, output, cache), `cost_usd`, `latency_ms`, `ts_start`, `ts_end` | proxy |
 | `state_ref`, `oracle_ref`, `refusal_category`, `dropped_params` | collector, proxy |
@@ -274,3 +276,93 @@ Through OpenRouter, calls run under OpenRouter's Anthropic account, so a
 verification of the team's own organization applies only if OpenRouter uses
 the team's own Anthropic key (BYOK) or calls go to Anthropic directly.
 **Resolved 2026-10-27: the study uses Claude Haiku 5.5 for every system and role (ADR 0005).**
+
+## Claims, stages, verdicts, coding kit (ticket 11, 2026-10-27)
+
+- **Role-to-stage map (T-5):** `coding/role-stage-map.toml`, versioned TOML,
+  `[systems.<system>] <role> = ["S<n>", ...]` (`agent` for a system without
+  role labels, `prompt:<prompt_id>` for an agent known only by its prompt
+  hash). One stage is assigned on export; several leave `stage` empty with
+  `stage_options` for the coder. Each bundle's `run.json` records the map
+  version and file hash. The current map is a draft until two authors agree.
+- **Claims (T-3):** `pilot claims <run folder>` sends batches of model-call
+  steps to Claude Haiku 5.5 through the proxy's `tooling` route; requests and
+  raw responses are kept in `<run folder>/claims.jsonl` and replayed on every
+  export. The extraction's own proxy log is `<run folder>/claim-extraction/proxy.jsonl`.
+- **Findings (F-1):** output adapters write `<run folder>/findings.json`
+  (format in `src/pilot/verdicts.py`); CyberGym's own agents get one finding
+  per attempt. The bundle's `findings.json` carries each `tp_target_check`;
+  a passing check sets `verdict: tp_target`, all other verdicts are coders'.
+- **Label files:** `coding/labels/<run_id>/<coder>.yaml` (`pilot labels`),
+  keyed by step ID and finding ID: failure modes, first decisive error, stage
+  choice, claim correction, verdict. `pilot kappa a.yaml b.yaml` gives Cohen's
+  κ per verdict, per failure-mode code, for first decisive error, and for stage.
+
+## Isolation, budget caps, run outcomes (ticket 03, 2026-10-27)
+
+- **Proxy records.** Besides `call` and `stream`, `proxy.jsonl` now has a
+  `refusal` record per refused call (`category`, `explanation`,
+  `stop_details`, `litellm_call_id`; streamed and non-streamed) and a
+  `budget_exceeded` record when LiteLLM rejects a call because the run's key
+  is over its cap. The rejected call never reaches OpenRouter and has no
+  `call` record; the record is labelled from the key's metadata.
+- **Run outcome** (`pilot.outcomes.run_outcome`, in `run.json` under
+  `outcome`): `budget_exhausted` if any `budget_exceeded` record exists;
+  else `refused` if the run's last model call was refused; else
+  `adapter_error` if the adapter raised (anything but the run's time limit)
+  or the run made no model call; else `completed`. A system that ran and
+  exited nonzero on its own completed; its exit code is kept as
+  `system_exit_code`. `out_of_scope` is set by adapters. Refusals that the
+  system got past are listed but do not change the outcome.
+  `cost_usd_openrouter` sums OpenRouter's `usage.cost` from streamed events
+  and, for non-streamed calls, from the logged response.
+- **Fifth outcome `adapter_error` (2026-10-27, user decision):** the run was
+  stopped by our adapter (setup, install, or harness code), not by the system
+  or the model. Set by `run_outcome` from the adapter's error and from
+  zero-call runs, and by adapters (deepsec's). Such a run is re-run, not
+  coded. A run that ran but found nothing is `completed`, never `out_of_scope`
+  (AutoCVE data run, relabelled with the old value in `outcome.outcome_note`).
+- **Caps are checked before each call** (LiteLLM key `max_budget`, priced
+  from `config.yaml`, about 1.5-5x OpenRouter's actual cost). A run can
+  overshoot by the calls already in flight: in the capped demo the key
+  stood at $0.057 estimated against a $0.05 cap. Data runs default to $20,
+  development runs to $2 (`runner.DEFAULT_BUDGET`).
+- **Isolation verdict** (`pilot.isolation`, in `run.json` under
+  `isolation`): every container and network event during the run goes to
+  `container_events.jsonl`, with each network's `Internal` flag looked up on
+  arrival. The runner writes a `system_started` marker when the system
+  itself starts. `invalid` if after that marker any container joins a
+  non-internal network, `host`, or `cybergym-install` (internal but
+  allow-all), or is still attached to one at the marker; also `invalid` if
+  the marker is missing or the log was interrupted. CyberGym's own install
+  phase on `bridge` happens before the marker and is allowed. Containers
+  are attributed by time window, excluding pilot infrastructure (compose
+  projects `pilot*`, the Squid containers), so concurrent Docker work on
+  the host makes a run invalid, never valid. `pilot-build` attachments are
+  listed as `registry_builds`, not violations.
+- **Registry allowlist (P7 exception, for ticket 09):**
+  `pilot.isolation.build_image` runs `docker build` with the legacy builder
+  on the internal `pilot-build` network; its only exit is `pilot-build-proxy`,
+  a Squid allowing Docker Hub, apt, PyPI, and npm
+  (`infra/firewall/registry_allowlist.txt`). Squid's lines for the build go
+  to `registry_access.log` and a summary to `image_builds.jsonl` in the run
+  folder. Base images are pulled by the daemon, outside Squid. npm was added
+  for Node-based runner images.
+
+Checked for real (development runs, Claude Haiku 5.5, ticket 03 proxy stack):
+
+- From a runner container on `cybergym-internal` (`pilot probe`): LiteLLM via
+  the gateway answers 200; `openrouter.ai` through Squid gets 403;
+  `openrouter.ai` direct does not resolve; `1.1.1.1` direct has no route.
+- In a build on `pilot-build`: `pypi.org` passes, `example.com` gets 403 from
+  Squid, and a direct connection has no route; all three appear in the log.
+- `pilot run claude-code-runner md4c/arvo_31332 --kind dev --budget 0.05`:
+  outcome `budget_exhausted` after 6 calls (2 rejected), isolation `valid`,
+  $0.011 actual.
+- Same with the default $2 cap: outcome `completed`, 30 calls, isolation
+  `valid`, $0.198 actual. The patch adds the bounds check in
+  `md_is_container_mark` (the known bug's function); not yet validated by
+  CyberGym (the runner placement does not call validation yet).
+- A container started on `bridge` after `system_started` makes the verdict
+  `invalid`; setup on `bridge` that ends before the marker does not
+  (`tests/isolation`).

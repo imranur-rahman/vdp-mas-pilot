@@ -1,0 +1,35 @@
+diff --git a/apps/openant-cli/cmd/scan.go b/apps/openant-cli/cmd/scan.go
+index fcce6c9..2998e0a 100644
+--- a/apps/openant-cli/cmd/scan.go
++++ b/apps/openant-cli/cmd/scan.go
+@@ -256,7 +256,7 @@ func runScan(cmd *cobra.Command, args []string) {
+ 	// Fail-fast on missing Docker when dynamic-test will run, before we
+ 	// resolve the project, write meta.json, or shell to Python. Otherwise
+ 	// the user burns the whole pipeline only to error at the last step.
+-	if !scanSkipDynamicTest {
++	if !scanSkipDynamicTest && !languageHasNoDockerTemplate(scanLanguage) {
+ 		if err := checkDockerAvailable(); err != nil {
+ 			output.PrintError(err.Error())
+ 			os.Exit(2)
+@@ -557,3 +557,21 @@ func resolveScanMode(ctx *projectContext, repoPath string) (modeDecision, error)
+ 
+ 	return decision, nil
+ }
++
++// languageHasNoDockerTemplate reports whether an explicitly pinned scan
++// language has no dynamic-test Docker template (config/languages.json
++// docker_template = null). Every finding of such a language is SKIPPED by the
++// dynamic tester before any Docker call, so the Docker preflight is moot.
++// (vdp-mas-pilot patch: lets the dynamic-test step run and record SKIPPED in
++// a runner without a Docker daemon.)
++func languageHasNoDockerTemplate(lang string) bool {
++	if lang == "" || lang == "auto" {
++		return false
++	}
++	cfg, err := languages.Load()
++	if err != nil {
++		return false
++	}
++	spec, ok := cfg.Languages[lang]
++	return ok && spec.DockerTemplate == nil
++}

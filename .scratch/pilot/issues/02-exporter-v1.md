@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Bundle contains step records with every field from the D4 step record (fields with no source yet are present and empty, not missing)
 - [ ] Each `llm_step` stores only the input new since that agent's previous call, plus the hash of the earlier input
@@ -13,3 +13,7 @@
 - [ ] `trajectory.md` renders the run so a person can review it without tools
 - [ ] Exporter tests (seam 2) run against ticket 01's fixture with no model spend
 - [ ] The exporter reads only the run folder, never Phoenix
+
+## Comments
+
+2026-10-27: Done on integration branch `integration/pilot` (head bd76bb2). Results, spend and remaining gaps are in `docs/pilot-report.md`; code-review fixes landed in `review/fixes`.

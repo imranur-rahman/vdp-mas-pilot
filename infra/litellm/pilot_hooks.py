@@ -9,9 +9,13 @@ sampling settings Sonnet 5.5 rejects (M-3), and attach pilot labels for the
 log. Summarized thinking (M-1) and provider routing are set on the finished
 upstream body (see finish_upstream_body).
 
-Logging: append one raw record per call to runs/<run_id>/proxy.jsonl.
+Logging: append raw records to runs/<run_id>/proxy.jsonl: one `call` record
+per call, a `stream` record with the raw events of each streamed call, a
+`refusal` record with its category for each refused call (M-2), and a
+`budget_exceeded` record when the run's key hits its cap (D6).
 """
 
+import copy
 import functools
 import hashlib
 import json
@@ -31,15 +35,20 @@ REJECTED_SAMPLING = ("temperature", "top_p", "top_k")
 # they rewrite legacy `thinking: enabled + budget_tokens` (sent by Claude Code)
 # into `adaptive` after the pre-call hook has run. Pinned to LiteLLM 1.106.4;
 # tests/proxy guards both paths.
+# Request fields kept in a `request` record (the conversation and its settings;
+# never the proxy's own metadata or credentials).
+REQUEST_FIELDS = ("model", "system", "messages", "tools", "tool_choice", "thinking", "output_config",
+                  "max_tokens", "stop_sequences", "temperature", "top_p", "top_k", "stream")
 PROVIDER_ROUTING = {"order": ["anthropic"], "allow_fallbacks": False}
 
 
 def finish_upstream_body(body: dict) -> dict:
     body["provider"] = PROVIDER_ROUTING  # ADR 0003
     thinking = body.get("thinking")
-    if isinstance(thinking, dict) and thinking.get("type") == "adaptive" \
-            and thinking.get("display") in (None, "omitted"):
-        thinking["display"] = "summarized"  # M-1; between_tools takes no display
+    if isinstance(thinking, dict) and thinking.get("type") == "adaptive":
+        # M-1: whatever the client asked for (logged as pilot_client_thinking);
+        # between_tools takes no display.
+        thinking["display"] = "summarized"
     return body
 
 
@@ -63,15 +72,24 @@ def system_prompt_text(data: dict) -> str:
         parts.append(system)
     elif isinstance(system, list):
         parts += [b.get("text", "") for b in system if isinstance(b, dict)]
+    # Only the leading system messages (OpenAI format) are the prompt; later
+    # ones (the Agent SDK's mid-conversation reminders) are conversation.
     for m in data.get("messages") or []:
-        if isinstance(m, dict) and m.get("role") == "system":
-            c = m.get("content")
-            parts.append(c if isinstance(c, str) else json.dumps(c, sort_keys=True))
+        if not (isinstance(m, dict) and m.get("role") == "system"):
+            break
+        c = m.get("content")
+        parts.append(c if isinstance(c, str) else json.dumps(c, sort_keys=True))
     return "\n".join(parts)
 
 
+BILLING_HEADER = "x-anthropic-billing-header:"
+
+
 def prompt_hash(data: dict) -> str | None:
-    text = system_prompt_text(data)
+    """Hash of the system prompt without Claude Code / the Agent SDK's
+    per-request billing-header line, which changes on every call
+    (pilot.exporter._prompt_id normalizes older logs the same way)."""
+    text = "\n".join(l for l in system_prompt_text(data).split("\n") if not l.startswith(BILLING_HEADER))
     return hashlib.sha256(text.encode()).hexdigest()[:16] if text else None
 
 
@@ -104,7 +122,7 @@ class PilotHooks(CustomLogger):
             "pilot_role": key_meta.get("pilot_role"),
             "pilot_requested_model": requested_model,
             "pilot_dropped_params": dropped,
-            "pilot_client_thinking": data.get("thinking"),
+            "pilot_client_thinking": copy.deepcopy(data.get("thinking")),  # finish_upstream_body mutates it
             "pilot_prompt_hash": prompt_hash(data),
             "pilot_call_type": str(call_type),
         })
@@ -119,17 +137,71 @@ class PilotHooks(CustomLogger):
                 events.append(item)
                 yield item
         finally:
-            meta = {}
-            for k in ("metadata", "litellm_metadata"):
-                meta.update(request_data.get(k) or {})
-            pilot = {k: v for k, v in meta.items() if k.startswith("pilot_")}
+            pilot = _pilot_labels(request_data)
+            raw = [_event(e) for e in events]
             self._append(pilot.get("pilot_run_id"), {
                 "logged_at": time.time(),
                 "record": "stream",
                 "litellm_call_id": request_data.get("litellm_call_id"),
                 "pilot": pilot,
-                "events": [_event(e) for e in events],
+                "events": raw,
             })
+            details = _streamed_refusal(raw)
+            if details is not None:
+                self._refusal(request_data, pilot, details)
+
+    async def async_post_call_success_hook(self, data, user_api_key_dict, response):
+        if not data.get("stream"):
+            # LiteLLM logs no `complete_input_dict` for non-streamed /v1/messages
+            # calls, so keep the request as the client sent it (after pre-call).
+            pilot = _pilot_labels(data)
+            self._append(pilot.get("pilot_run_id"), {
+                "logged_at": time.time(),
+                "record": "request",
+                "litellm_call_id": data.get("litellm_call_id"),
+                "pilot": pilot,
+                "body": {k: data[k] for k in REQUEST_FIELDS if k in data},
+            })
+        body = response if isinstance(response, dict) else \
+            getattr(response, "model_dump", lambda: {})()
+        if isinstance(body, dict) and body.get("stop_reason") == "refusal":
+            self._refusal(data, _pilot_labels(data), body.get("stop_details") or {})
+        elif isinstance(body, dict) and any(isinstance(c, dict) and c.get("finish_reason") == "content_filter"
+                                            for c in body.get("choices") or []):
+            # OpenAI format: LiteLLM maps Anthropic's refusal to content_filter
+            # and keeps no stop_details, so the category is unknown.
+            self._refusal(data, _pilot_labels(data), {})
+        return response
+
+    async def async_post_call_failure_hook(self, request_data, original_exception, user_api_key_dict,
+                                           traceback_str=None):
+        # A key over its cap is rejected before the call exists, so no `call`
+        # record is written; label the rejection from the key itself.
+        if "budget" not in f"{type(original_exception).__name__} {original_exception}".lower():
+            return None
+        key_meta = getattr(user_api_key_dict, "metadata", None) or {}
+        pilot = {k: v for k, v in key_meta.items() if k.startswith("pilot_")}
+        self._append(pilot.get("pilot_run_id"), {
+            "logged_at": time.time(),
+            "record": "budget_exceeded",
+            "pilot": pilot,
+            "spend": getattr(user_api_key_dict, "spend", None),
+            "max_budget": getattr(user_api_key_dict, "max_budget", None),
+            "requested_model": request_data.get("model"),
+            "exception": str(original_exception),
+        })
+        return None
+
+    def _refusal(self, request_data, pilot, details):
+        self._append(pilot.get("pilot_run_id"), {
+            "logged_at": time.time(),
+            "record": "refusal",
+            "litellm_call_id": request_data.get("litellm_call_id"),
+            "pilot": pilot,
+            "category": details.get("category"),
+            "explanation": details.get("explanation"),
+            "stop_details": details,
+        })
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
         self._write(kwargs, response_obj, start_time, end_time, "success")
@@ -167,6 +239,29 @@ class PilotHooks(CustomLogger):
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("a") as f:
             f.write(json.dumps(record, default=str) + "\n")
+
+
+def _pilot_labels(request_data: dict) -> dict:
+    meta = {}
+    for k in ("metadata", "litellm_metadata"):
+        meta.update(request_data.get(k) or {})
+    return {k: v for k, v in meta.items() if k.startswith("pilot_")}
+
+
+def _streamed_refusal(raw_events: list) -> dict | None:
+    """stop_details of a streamed call that stopped with `refusal`, else None."""
+    for event in raw_events:
+        for line in str(event).split("\n"):
+            if not line.startswith("data:"):
+                continue
+            try:
+                d = json.loads(line[5:])
+            except ValueError:
+                continue
+            delta = d.get("delta") if isinstance(d, dict) and d.get("type") == "message_delta" else None
+            if isinstance(delta, dict) and delta.get("stop_reason") == "refusal":
+                return delta.get("stop_details") or {}
+    return None
 
 
 def _event(item):

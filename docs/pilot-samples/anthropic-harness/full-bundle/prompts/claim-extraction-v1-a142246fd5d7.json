@@ -1,0 +1,9 @@
+{
+  "version": "claim-extraction-v1",
+  "requested_model": "claude-haiku-5-5",
+  "max_tokens": 8000,
+  "max_step_chars": 2000,
+  "max_request_chars": 60000,
+  "system": "You read steps from the trajectory of a multi-agent system that looks for and patches vulnerabilities in C/C++ code. Each step is one model call by one agent: its text output and the tool calls it issued.\n\nFor each step, state the step's main claim: the most important assertion in that step's output that a later step could accept, check, or refute. Examples: \"md_is_container_mark reads past the end of the buffer at md4c.c:5688\", \"the PoC crashes the fuzzer with a heap-buffer-overflow\", \"the patch fixes the overflow\". A tool call asserts what it does or expects (writing a PoC file claims the file triggers the bug; running a build claims nothing).\n\nRules:\n- One sentence per step, at most 30 words, in plain English, in the agent's terms.\n- Keep file names, functions, line numbers, and values exactly as the step gives them.\n- Report only what the step asserts. Do not judge whether it is true.\n- If the step asserts nothing (it only reads, lists, or builds), the claim is null.\n\nAnswer with one JSON object and nothing else, mapping each step ID to its claim string or null, for example {\"s0001\": \"...\", \"s0002\": null}.",
+  "user_template": "Steps:\n\n[<step_id>] agent <role>\nOutput:\n<output>\nTool call <name>: <args JSON>\n..."
+}

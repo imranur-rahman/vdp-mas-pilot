@@ -1,0 +1,951 @@
+{
+  "ground_truth": "oracle/ground_truth.patch",
+  "findings": [
+    {
+      "finding_id": "deepsec:finding_03c7f594f8790218",
+      "system": "deepsec",
+      "location": {
+        "file": "md2html/md2html.c",
+        "function": "cmdline_callback",
+        "line_start": 318,
+        "line_end": 326
+      },
+      "description": "--commonmark/--github silently clear earlier parser flags, including --fno-html\n\nLines 318-319 assign instead of OR-ing: `case 'c': parser_flags = MD_DIALECT_COMMONMARK;` and `case 'g': parser_flags = MD_DIALECT_GITHUB;`. Every other parser option uses `|=` (lines 322-337). MD_DIALECT_COMMONMARK is 0 and MD_DIALECT_GITHUB is PERMISSIVEAUTOLINKS|TABLES|STRIKETHROUGH|TASKLISTS (src/md4c.h:332-333), so neither contains MD_FLAG_NOHTMLBLOCKS (0x20) or MD_FLAG_NOHTMLSPANS (0x40) (src/md4c.h:310-311). Any -F, -G, or -H/--fno-html given before a dialect option is cleared with no warning. `md2html --fno-html --github doc.md` passes raw HTML through, while `md2html --github --fno-html doc.md` suppresses it. The man page (md2html.1:50) says dialect options are 'equivalent to some combination of flags', which implies they compose in any order. Attack scenario: the attacker controls only the Markdown. An operator, or a wrapper that prepends --fno-html and forwards a user-selected dialect flag, gets attacker-supplied `<script>` or `<img onerror=...>` emitted verbatim into output that was meant to be free of raw HTML. The same clearing silently drops -A, -I, -W, -L, -K, -_, -X, -S, -T, -V, -U, -., and -@ when they precede a dialect flag (functional impact, not security).",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "--commonmark/--github silently clear earlier parser flags, including --fno-html",
+      "lines": [
+        318,
+        319,
+        324,
+        325,
+        326
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "other-security-flag-dropped",
+        "confidence": "high",
+        "recommendation": "Keep dialect as a separate variable, e.g. `static unsigned dialect_flags = MD_DIALECT_COMMONMARK;` set by -c/-g, and pass `parser_flags | dialect_flags` to md_html. Explicit flags then survive regardless of argument order. Consider warning or erroring on conflicting combinations instead of silently dropping flags.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. md2html.c:318-319 assign with '=' (parser_flags = MD_DIALECT_COMMONMARK and MD_DIALECT_GITHUB), while every other parser option ORs (322-337). MD_DIALECT_GITHUB (md4c.h:333) includes neither MD_FLAG_NOHTMLBLOCKS (0x20) nor MD_FLAG_NOHTMLSPANS (0x40), so '--fno-html --github' emits raw HTML while '--github --fno-html' does not. The man page (md2html.1:50) says dialect options are equivalent to combinations of flags, which implies order independence. The attacker does not control flags, so exploitation needs an operator or wrapper that puts --fno-html before a dialect option, after which attacker-supplied script tags or event-handler img tags are emitted verbatim. The effect is a silent fail-open of a documented suppression. The same clearing also silently drops -W, -L, -K, -S, -T, -X and other flags, which is a functional bug. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "md2html/md2html.c",
+            "function": "cmdline_callback",
+            "line_start": 318,
+            "line_end": 326
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_9906a4580e9d1a9b",
+      "system": "deepsec",
+      "location": {
+        "file": "md2html/md2html.c",
+        "function": "process_file",
+        "line_start": 138,
+        "line_end": 145
+      },
+      "description": "Inputs of 4 GiB or more are silently truncated to a 32-bit length\n\nbuf_in.size is size_t, but md_html() takes an MD_SIZE, which is unsigned 32-bit (src/md4c.h:47, src/md4c-html.h:59). Line 145 casts without a range check. For input of 2^32 bytes or more, the parser receives `size mod 2^32` bytes, so the output covers only a prefix, and md2html still exits 0 with no diagnostic. This is silent data loss, not memory corruption, because the truncated length never exceeds the real buffer. The cast on line 138 (initial output capacity) wraps harmlessly because membuf_append grows on demand.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Inputs of 4 GiB or more are silently truncated to a 32-bit length",
+      "lines": [
+        138,
+        144,
+        145
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-integer-truncation",
+        "confidence": "high",
+        "recommendation": "After reading, reject buf_in.size above UINT_MAX (or the MD_SIZE maximum) with an error message and a non-zero exit, or move to a size_t-based API.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. md2html.c:145 casts buf_in.size (size_t) to MD_SIZE (unsigned 32-bit, md4c.h:47) with no range check. For inputs of 2^32 bytes or more, md_html receives size mod 2^32 bytes, so the output is a silent prefix and md2html exits 0 with no diagnostic. There is no memory corruption, since the truncated length never exceeds the real buffer. The cast at line 138 only sizes the initial output buffer and is harmless, because membuf_append grows on demand. Keep BUG, and the proposed size check is the right fix.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "md2html/md2html.c",
+            "function": "process_file",
+            "line_start": 138,
+            "line_end": 145
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_68ffbe012a53b333",
+      "system": "deepsec",
+      "location": {
+        "file": "md2html/md2html.c",
+        "function": "process_file",
+        "line_start": 130,
+        "line_end": 362
+      },
+      "description": "Read errors are treated as EOF; a directory argument yields empty output with exit 0\n\nThe read loop breaks on `n == 0` (lines 130-132) and never checks ferror(in). On POSIX, fopen() of a directory in 'rb' mode succeeds (line 362 has no S_ISREG/S_ISDIR check), and the first fread() fails with EISDIR and returns 0. So `md2html somedir -o out.html` creates an empty output file (or the -f skeleton) and exits 0 with no diagnostic. Any other mid-stream read error (EIO, or an invalid stdin) yields silently truncated input in the same way.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Read errors are treated as EOF; a directory argument yields empty output with exit 0",
+      "lines": [
+        130,
+        131,
+        132,
+        362
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-error-handling",
+        "confidence": "high",
+        "recommendation": "After the loop, check ferror(in) and fail with a message and a non-zero status. Optionally reject non-regular files with fstat() before reading.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. The read loop (md2html.c:126-134) breaks on n == 0 and never calls ferror(in). fopen(dir, 'rb') succeeds on POSIX with no S_ISREG check at line 362, and the first fread fails with EISDIR and returns 0. The result is an empty document, an empty output file, and exit status 0. Mid-stream I/O errors are truncated in the same way, and so is an invalid stdin. Keep BUG.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "md2html/md2html.c",
+            "function": "process_file",
+            "line_start": 130,
+            "line_end": 362
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_d448dee9469d4c92",
+      "system": "deepsec",
+      "location": {
+        "file": "md2html/md2html.c",
+        "function": "process_file",
+        "line_start": 156,
+        "line_end": 380
+      },
+      "description": "Write errors are ignored, so truncated output is reported as success\n\nWrite-side errors are never checked: fwrite() on line 171, the header/footer fprintf() calls (lines 154-176), and fclose(out) on line 380. main() returns only the parse status (ret). On ENOSPC, EIO, or EDQUOT, the output is truncated but md2html still exits 0. Stdout is never checked with ferror() either. A build step such as `md2html -o page.html src.md && publish page.html` will publish a truncated document as a success.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Write errors are ignored, so truncated output is reported as success",
+      "lines": [
+        156,
+        171,
+        380
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-error-handling",
+        "confidence": "high",
+        "recommendation": "Compare fwrite()'s return value with the byte count, check ferror(out) before exit, check fclose()'s return value, and return non-zero. For -o, remove the partial file on failure.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. The fwrite at line 171, the header and footer fprintf calls (154-176), and fclose(out) at line 380 all have unchecked results, and main returns only the parse status (ret, 376-382). On ENOSPC, EIO, or EDQUOT the output is truncated but md2html exits 0, and stdout is never checked with ferror. A pipeline such as 'md2html -o page.html src.md && publish page.html' therefore publishes truncated output as a success. Keep BUG.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "md2html/md2html.c",
+            "function": "process_file",
+            "line_start": 156,
+            "line_end": 380
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_3cc0f84673b75006",
+      "system": "deepsec",
+      "location": {
+        "file": "md2html/md2html.c",
+        "function": "process_file",
+        "line_start": 127,
+        "line_end": 130
+      },
+      "description": "32-bit size_t wrap in input buffer growth can cause an out-of-bounds fread on huge inputs\n\nThe growth expression `buf_in.asize + buf_in.asize / 2` (line 128) is evaluated in size_t. On 32-bit builds, once asize reaches about 2.86 GiB (2^32 * 2/3), the sum wraps to a value below asize, and in this loop below the current size as well. realloc() then shrinks the block. Line 130 computes `buf_in.asize - buf_in.size`, which wraps to a huge count, so fread() can write up to about 4 GiB of attacker-chosen input past a small allocation. Preconditions: a 32-bit build, an input of at least 2.86 GiB, and a contiguous 2.86 GiB allocation in a 32-bit address space, so this is theoretical. 64-bit builds are not affected. The same pattern at line 98 would need a 2.86 GiB output buffer and is not practically reachable.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "32-bit size_t wrap in input buffer growth can cause an out-of-bounds fread on huge inputs",
+      "lines": [
+        127,
+        128,
+        130
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-integer-overflow",
+        "confidence": "low",
+        "recommendation": "Reject input larger than 2^31-1 bytes before growing. With that cap, asize stays below 2^32 * 2/3 and the growth cannot wrap, which also resolves the truncation finding on all platforms. Alternatively, check for overflow before computing the new size.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Mechanically confirmed, on 32-bit builds only. At line 128, buf_in.asize + buf_in.asize / 2 is computed in 32-bit size_t and wraps once asize exceeds 2^32*2/3, about 2.86 GB. realloc then shrinks the block, and the fread length at line 130 (asize - size) underflows, so fread writes past the allocation. On 64-bit builds size_t does not wrap. Reaching the bug requires a full input buffer of at least 2.86 GB in a 32-bit process, where the growing allocation would very likely fail first, so exploitation is theoretical. The defect is real but practically unreachable. Keep BUG, and the proposed 2^31-1 input cap is the right fix.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "md2html/md2html.c",
+            "function": "process_file",
+            "line_start": 127,
+            "line_end": 130
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_8ca97b74becd5ed0",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c-html.c",
+        "function": null,
+        "line_start": 340,
+        "line_end": 515
+      },
+      "description": "Raw inline HTML inside an image description is written verbatim into the alt attribute, breaking out of it\n\ntext_callback() (md4c-html.c lines 503-521) emits MD_TEXT_HTML through render_verbatim() at line 515 without checking image_nesting_level. Enter and leave of the image's inner spans are suppressed (lines 439-456 and 479-485), but the raw text is still emitted. render_open_img_span() (lines 340-349) writes alt=\" and the alt text is never HTML-escaped on this path. So ![<a title=\"x\" onerror=\"alert(1)\">](x.png) yields <img src=\"x.png\" alt=\"<a title=\"x\" onerror=\"alert(1)\">\" />. The double quotes in the raw HTML end the attribute, and onerror becomes a live event handler. The md4c.h comment on MD_SPAN_IMG says the parser must handle nested content in alt, and the renderer's contract is that attribute text is escaped. Exposure is limited to configurations with inline raw HTML enabled, because MD_FLAG_NOHTMLSPANS prevents MD_TEXT_HTML from being produced at all. Within that scope the attribute-escaping guarantee is broken.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Raw inline HTML inside an image description is written verbatim into the alt attribute, breaking out of it",
+      "lines": [
+        340,
+        343,
+        346,
+        348,
+        439,
+        455,
+        479,
+        482,
+        503,
+        514,
+        515
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "xss",
+        "confidence": "high",
+        "recommendation": "In text_callback(), when r->image_nesting_level > 0, emit MD_TEXT_HTML with render_html_escaped() (or as plain text) instead of render_verbatim(). Add a regression test for raw HTML inside an image description.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. text_callback (md4c-html.c:514-515) emits MD_TEXT_HTML through render_verbatim without checking image_nesting_level. Entering and leaving other spans is suppressed inside an image (439-456, 479-485), but raw inline HTML arrives as text callbacks rather than spans, so its bytes land inside the alt attribute unescaped. render_open_img_span (340-349) only writes the alt opener and increments the nesting level. A raw tag in the description whose double-quoted attribute value contains a double quote ends the alt value early, and an onerror handler then becomes a live attribute of the img element. md4c.h:119-123 says the parser must handle nested content in alt, and the threat model treats attribute paths that skip escaping as reportable. It requires inline raw HTML (no MD_FLAG_NOHTMLSPANS), which is the default. It gives no capability beyond raw HTML, but it is an attribute-context breakout that violates the documented escaping contract. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c-html.c",
+            "function": null,
+            "line_start": 340,
+            "line_end": 515
+          },
+          "matched_by": "lines",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_8ea27d34ebabeee4",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c-html.c",
+        "function": "render_open_img_span",
+        "line_start": 348,
+        "line_end": 483
+      },
+      "description": "Nested images: the inner image closes the outer alt early, leaking alt text into the body and emitting stray closing tags\n\nenter_span_callback() returns early for every span type while image_nesting_level > 0 (lines 439-456), so an inner MD_SPAN_IMG never increments the counter. leave_span_callback() (lines 479-485) closes the outer image whenever the counter is exactly 1 and the span is an image. The inner image's end therefore writes the outer <img> close and drops the counter to 0, and the rest of the alt text renders as body text. Example: ![a ![b](c) d](e) produces <img src=\"e\" alt=\"a b\"> d. For ![x [![y](z)](w)](v) the link's leave runs at counter 0 and emits an orphan </a>. The output stays escaped, so this is structural breakage rather than an injection.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Nested images: the inner image closes the outer alt early, leaking alt text into the body and emitting stray closing tags",
+      "lines": [
+        348,
+        361,
+        439,
+        455,
+        479,
+        482,
+        483
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-logic-bug",
+        "confidence": "high",
+        "recommendation": "Make nested MD_SPAN_IMG enters increment the depth and nested leaves decrement it, closing the tag only when the depth returns to 0. Add tests for nested images and for an image containing a link.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. While image_nesting_level > 0, enter_span_callback returns early for every span type (439-456), so a nested MD_SPAN_IMG does not increment the counter. leave_span_callback (479-483) then sees level 1 at the inner image's end, calls render_close_img_span with the inner detail, which closes the outer img tag, and drops the level to 0. For '![a ![b](c) d](e)' the output is an img element whose alt is 'a b', followed by ' d' as body text. For '![x [![y](z)](w)](v)' the link's leave runs at depth 0 and emits an orphan </a>. All text remains escaped and no attacker bytes reach an unescaped context, so this is structural breakage (CommonMark gives nested images alt text), not injection. Keep BUG.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c-html.c",
+            "function": "render_open_img_span",
+            "line_start": 348,
+            "line_end": 483
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_469379914a40dffc",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": null,
+        "line_start": 390,
+        "line_end": 4317
+      },
+      "description": "MD_TEMP_BUFFER truncates to 32 bits, so a huge www./email autolink destination overflows the heap buffer\n\nMD_TEMP_BUFFER (line 394) computes ((sz)+(sz)/2+128)&~127 in size_t but stores it in SZ, which is 32-bit. Its only caller, md_process_inlines (lines 4312-4317), passes dest_size*sizeof(CHAR) for www. and email autolinks. Once sz is about 2.86e9 bytes or more, the sum wraps past 2^32, so ctx->buffer is realloc'd to a small size (tens of megabytes at sz=2.9e9) and alloc_buffer records that small value. The memcpy at line 4317 then copies dest_size-7 bytes (about 2.9e9) into that buffer. Trigger: a single line with 'www.' followed by about 2.9e9 alphanumerics and '.c', with MD_FLAG_PERMISSIVEWWWAUTOLINKS (part of MD_DIALECT_GITHUB). Email autolinks with a huge domain or username take the same path. This needs an input of about 2.9 GB. The 32-bit MD_SIZE API accepts that, and md2html reads whole files without a cap. Past that size, the copy writes attacker-chosen bytes past a heap allocation.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "MD_TEMP_BUFFER truncates to 32 bits, so a huge www./email autolink destination overflows the heap buffer",
+      "lines": [
+        390,
+        394,
+        4312,
+        4313,
+        4316,
+        4317
+      ],
+      "native": {
+        "severity": "HIGH",
+        "vulnSlug": "other-integer-overflow",
+        "confidence": "high",
+        "recommendation": "Do the arithmetic in size_t, make ctx->alloc_buffer a size_t, and check the requested size before adding slack. Reject or cap destinations above a documented limit. Better, build the 'http://' or 'mailto:' prefix directly in the attribute builder so no large temporary copy is made.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. MD_TEMP_BUFFER (md4c.c:389-405) computes ((sz) + (sz)/2 + 128) & ~127 in size_t, because sz = dest_size*sizeof(CHAR) is size_t, but assigns the result to SZ new_size (unsigned 32-bit, md4c.h:47) at line 393, so it wraps mod 2^32 once sz reaches about 2.863e9. The only caller, md_process_inlines at 4311-4317, does dest_size += 7 for '.' (www) and '@' openers, calls MD_TEMP_BUFFER(dest_size*sizeof(CHAR)), then memcpy(ctx->buffer+7, dest, dest_size-7) with the untruncated length. For a 2.9e9-byte destination the realloc is about 55 MB while the copy is about 2.9e9 bytes, which is a heap overflow whose bytes the attacker chooses. Nothing caps this path: md_analyze_permissive_url_autolink (3850-3866) and md_analyze_permissive_email_autolink (3934-3942) scan without a bound, and the 63-character limit at 2934 applies only to <...> autolinks. MD_FLAG_PERMISSIVEWWWAUTOLINKS is part of MD_DIALECT_GITHUB, so one line of 'www.' plus about 2.9e9 alphanumerics plus '.c' reaches the bug. The precondition is a document of at least 2.86 GB, but md_parse accepts up to 4 GiB by design and the threat model says length is uncapped, so this violates the memory-safety contract. Keep HIGH.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": null,
+            "line_start": 390,
+            "line_end": 4317
+          },
+          "matched_by": "lines",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_e4add78920f55f0e",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_is_link_reference",
+        "line_start": 2219,
+        "line_end": 3581
+      },
+      "description": "Quadratic time in link resolution: each bracket pair scans from the paragraph's first line\n\nmd_is_link_reference() (lines 2219-2223) and md_is_inline_link_spec() (lines 2269-2270) find the line holding a position with 'beg_line = lines; while(beg >= beg_line->end) beg_line++;', always starting from the first line of the paragraph. md_resolve_links() calls them for each bracket pair that is not an inline link (calls at lines 3521, 3524, 3543, 3581). Each call therefore costs O(index of the bracket's line), and a paragraph of N lines that each contain a pair such as [a] costs about N^2/2 steps. A 1 MB input (about 250k lines) costs roughly 3e10 iterations. The line search runs before md_lookup_ref_def's early return, so this happens even when the document has no reference definitions. The README claims linear time, and earlier fixes (#58-#66) addressed this class of regression.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Quadratic time in link resolution: each bracket pair scans from the paragraph's first line",
+      "lines": [
+        2219,
+        2220,
+        2221,
+        2222,
+        2223,
+        2269,
+        2270,
+        3521,
+        3524,
+        3543,
+        3581
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "other-algorithmic-dos",
+        "confidence": "high",
+        "recommendation": "Find the line index in O(log L) by binary search over lines[].beg/end, or record the line index on the bracket mark during md_collect_marks() and pass it in. Either way, do not start the search at lines[0] for every call.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. md_is_link_reference (2219-2223) and md_is_inline_link_spec (2269-2270) find the line holding a position with 'while(beg >= beg_line->end) beg_line++', always starting at lines[0], so each call costs O(index of that line). md_resolve_links calls md_is_link_reference for every bracket pair that is not an inline link (3581) and for adjacent pairs (3521, 3524). The line search runs before the early return in md_lookup_ref_def (1801-1802), so the cost is paid even with zero reference definitions. I traced '[a]' repeated on N lines: each pair's next opener is not adjacent, the inline check fails on the newline, and the code walks from line 0 to the pair's own line. That is about N^2/2 pointer steps, roughly 3e10 for a 1 MB input of about 262k lines, with no line-count cap. It uses only default CommonMark features, and the README promises linear time, so this is the quadratic regression class from #58-#66. Its root cause (line lookup) differs from F3 (label hashing), so it is not a duplicate. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_is_link_reference",
+            "line_start": 2219,
+            "line_end": 3581
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_356e8a9c08534e28",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": null,
+        "line_start": 1795,
+        "line_end": 3581
+      },
+      "description": "Quadratic time when a reference definition exists: nested bracket labels are hashed in full for every pair\n\nmd_is_link_reference() passes the whole span between each bracket pair as a label to md_lookup_ref_def() (line 2238). That function returns early only when the hashtable is empty and otherwise calls md_link_label_hash() over the label (line 1804). The label length is not capped on this path. md_is_link_label() enforces the 999-character limit only for reference definitions. With one definition such as '[x]: /y' and nested brackets (N '[' followed by N ']'), pair k hashes roughly 2k characters, so the total is about N^2 characters, each with Unicode folding and FNV processing. N = 50,000 (a 100 KB input) costs about 2.5e9 character steps, which keeps the process busy for many seconds.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Quadratic time when a reference definition exists: nested bracket labels are hashed in full for every pair",
+      "lines": [
+        1795,
+        1801,
+        1802,
+        1804,
+        2202,
+        2238,
+        3521,
+        3524,
+        3581
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "other-algorithmic-dos",
+        "confidence": "high",
+        "recommendation": "Reject link labels longer than 999 characters in md_is_link_reference() before hashing, as CommonMark requires. Memoizing hashes per label start would also work.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. md_is_link_reference (2202-2254) passes the full span between each bracket pair, including nested brackets, to md_lookup_ref_def at 2238. That function returns early only when the hashtable is empty (1801-1802); once any reference definition exists, md_link_label_hash (1521-1550) walks every character of the label. The 999-character check in md_is_link_label (1912) is reached only from reference-definition parsing (called at 2100), so the use path has no label-length limit, which is also a CommonMark 0.30 conformance gap. With '[x]: /y' defined and N '[' followed by N ']', md_resolve_links does not skip pairs (3425-3431 never fires because last_link_beg and last_link_end stay 0), so pair k hashes about 2k characters and the total is about N^2, roughly 2.5e9 characters from a 100 KB input. Its root cause (label hashing) differs from F2 (line lookup), so it is not a duplicate. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": null,
+            "line_start": 1795,
+            "line_end": 3581
+          },
+          "matched_by": "lines",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_e6a6da7db903b746",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_build_attr_append_substr",
+        "line_start": 1359,
+        "line_end": 1477
+      },
+      "description": "Double free in md_build_attr_append_substr() when the second realloc() fails\n\nAfter the first realloc() of build->substr_types succeeds (line 1359), the old pointer is no longer valid. If the realloc() of build->substr_offsets then fails (line 1366), the code frees new_substr_types (line 1370) and returns -1 without restoring build->substr_types, which still holds the stale pointer. The abort path in md_build_attribute() (lines 1476-1478) calls md_free_attribute() (lines 1384-1394), which calls free(build->substr_types) again: a double free, or a use-after-free if the first realloc moved the block. Reaching it needs an attribute with at least 8 substrings (for example a link title with many entities or NUL bytes, so the array grows) and an allocation failure at exactly that realloc. The scanner's allocation notes do not cover this error path.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Double free in md_build_attr_append_substr() when the second realloc() fails",
+      "lines": [
+        1359,
+        1366,
+        1368,
+        1370,
+        1374,
+        1375,
+        1384,
+        1390,
+        1391,
+        1392,
+        1476,
+        1477
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "other-double-free",
+        "confidence": "high",
+        "recommendation": "Assign both realloc() results to temporaries, and update build->substr_types and build->substr_offsets only after both succeed. If either fails, keep the original pointers, free only the new temporaries, and let md_free_attribute() free the originals exactly once.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "The specific mechanism is real. After the first realloc at 1359 succeeds, a failing second realloc at 1366 frees new_substr_types and returns -1, leaving build->substr_types stale, and md_free_attribute (1384-1394) then frees it again. The finding understates the scope. md_build_attribute's own abort (1476-1478) already calls md_free_attribute, and its callers free the same build again: md_enter_leave_span_a (4094-4096) and md_enter_leave_span_wikilink (4115-4116) unconditionally after MD_CHECK, and md_process_leaf_block (4798-4801), which also frees an uninitialized lang_build when info_build fails. Because substr_alloc is set to 8 at line 1356 before the first realloc, any failing realloc in md_build_attr_append_substr double-frees build->text in the callers, not only in the second-realloc case. The threat model's 'NULL-tested allocation' note does not cover this abort path. Exploitation needs an allocation failure that the attacker cannot easily control, so this is memory corruption on an OOM error path. The proposed temporaries fix is necessary but not sufficient, since ownership also has to change. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_build_attr_append_substr",
+            "line_start": 1359,
+            "line_end": 1477
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_ece8a900dbbd8fcd",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_is_html_block_start_condition",
+        "line_start": 5337,
+        "line_end": 5493
+      },
+      "description": "<textarea> opens a raw HTML block that never closes at </textarea>, so later Markdown is emitted unescaped\n\nLine 5337 adds textarea to the type-1 start list, as the CommonMark 0.30 change described in the changelog. The type-1 end scan in md_is_html_block_end_condition() (lines 5467-5493) checks only </script>, </style>, and </pre> (lines 5473, 5478, 5483). CommonMark also requires </textarea>. So a line that starts with <textarea makes everything after it an HTML block that runs to the end of the document or the end of the enclosing container. Blank lines do not end it either. Its contents go out as MD_TEXT_HTML, which md4c-html renders verbatim (md4c-html.c line 515), so text escaping stops for the rest of the document, and MD_FLAG_NOHTMLSPANS stops having its effect there. Exposure is limited, because raw block HTML is already allowed in every configuration where this path is reachable (MD_FLAG_NOHTMLBLOCKS disables it). It is still a broken escaping guarantee and a serious rendering regression.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "<textarea> opens a raw HTML block that never closes at </textarea>, so later Markdown is emitted unescaped",
+      "lines": [
+        5337,
+        5463,
+        5467,
+        5473,
+        5478,
+        5483,
+        5486,
+        5493
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "dangerous-html",
+        "confidence": "high",
+        "recommendation": "Add a case-insensitive </textarea> check to the type-1 end scan, using the bounds-checked comparison described in the out-of-bounds finding. Add a regression test with a textarea line followed by Markdown.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. Line 5337 adds textarea to the type-1 start list, as CHANGELOG.md:13-14 and the 0.30 spec (test/spec.txt:2380-2383) require, but the type-1 end scan (5467-5493) checks only </script>, </style>, and </pre> and omits </textarea>. Because the HTML continuation check (5810-5837) runs before the blank-line check, the block continues through blank lines to the end of the container or document. The spec example at spec.txt:2773-2791 passes only because </textarea> is the final line; with any following content, md4c keeps the block open where CommonMark closes it. md_process_verbatim_block_contents emits MD_TEXT_HTML, which md4c-html renders verbatim (md4c-html.c:515), so later Markdown is neither rendered nor escaped. With MD_FLAG_NOHTMLSPANS set and MD_FLAG_NOHTMLBLOCKS unset, inline tags that the flag should neutralize come out raw. Exposure is limited: the NOHTML configurations are unaffected, and attackers can already emit raw HTML blocks in NOHTMLSPANS-only configurations. Still, the escaping guarantee on the text path is broken and this is a clear spec deviation. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_is_html_block_start_condition",
+            "line_start": 5337,
+            "line_end": 5493
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_ed2deecd09e6efaf",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_is_inline_link_spec",
+        "line_start": 2278,
+        "line_end": 4344
+      },
+      "description": "Inline link parser reads ctx->text[size]; a following ')' extends the link past the input and overruns the marks array\n\nIn md_is_inline_link_spec(), the reads at line 2321 (ISNEWLINE(off), evaluated when off >= the line end) and line 2327 (CH(off) != ')') have no off < ctx->size guard, unlike the guarded check at line 2278. If the last line ends at the end of the buffer, for example '[a](b' with nothing after it, off == ctx->size and the code reads one byte past the input. If that byte is ')', the function accepts the link and sets *p_end = size+1 (line 2346). md_resolve_links() stores that as closer->end (line 3575). md_process_inlines() then sets off = mark->end (line 4339), and the skip loop at line 4344 finds no mark with beg >= size+1. It walks past the sentinel mark and beyond ctx->marks, reading unrelated heap memory. When md_html() gets a slice of a larger buffer, an attacker controls the byte past the end, so this can become a crash or a memory disclosure. Ordinary buffers only see a stray one-byte read.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Inline link parser reads ctx->text[size]; a following ')' extends the link past the input and overruns the marks array",
+      "lines": [
+        2278,
+        2321,
+        2327,
+        2346,
+        3575,
+        4339,
+        4344
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "other-oob-read",
+        "confidence": "high",
+        "recommendation": "Guard every CH() and ISNEWLINE() read in this function with off < ctx->size. Reject any destination, title, or closer whose end exceeds ctx->size before storing it. Bound the renderer's skip loop by the sentinel mark.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. In md_is_inline_link_spec, line 2278 guards ctx->size before ISNEWLINE, but line 2321 evaluates ISNEWLINE(off) whenever off >= lines[line_index].end with no size guard, and line 2327 reads CH(off) again. For input ending in an unclosed destination such as '[a](b', the traced path reaches off == ctx->size and reads ctx->text[size]. If that byte is ')', off becomes size+1 and *p_end = size+1 (2346), so md_resolve_links stores closer->end = size+1 (3575). md_process_inlines then runs 'while(mark->end > line->end) line++' at 4272-4274, which walks past the lines array, and the skip loop at 4344 passes the sentinel mark (beg = size) and walks past ctx->marks. In md2html the byte past the buffer is heap memory the attacker does not control, so the typical effect is a benign one-byte read. The escalation needs an attacker-influenced byte past the end, which the threat model says slice embedding can create. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_is_inline_link_spec",
+            "line_start": 2278,
+            "line_end": 4344
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_e6d8e9a94cb955d1",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_end_current_block",
+        "line_start": 5040,
+        "line_end": 6106
+      },
+      "description": "Task-list marker handling skips whitespace with no end check, reading past the end of the input\n\nWith MD_FLAG_TASKLISTS (included in MD_DIALECT_GITHUB), the code accepts a task marker whose closing ']' is the final byte (line 6098, tmp + 3 == ctx->size). It sets off = tmp + 3, which equals ctx->size, and runs 'while(ISWHITESPACE(off)) off++;' (lines 6104-6105) with no bound. The first read is ctx->text[size]. A document ending in '- [ ]' reads one byte past the buffer. If the bytes past the end are spaces or tabs, the loop keeps going with no limit and sets line->beg past the end (line 6106). md_end_current_block() then evaluates CH(lines[0].beg) (line 5040), another out-of-range read. The result depends on memory past the buffer, so the impact ranges from a stray read to a crash, and in slice-embedding setups it can be attacker-influenced.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Task-list marker handling skips whitespace with no end check, reading past the end of the input",
+      "lines": [
+        5040,
+        6094,
+        6098,
+        6103,
+        6104,
+        6105,
+        6106
+      ],
+      "native": {
+        "severity": "MEDIUM",
+        "vulnSlug": "other-oob-read",
+        "confidence": "high",
+        "recommendation": "Bound the loop with off < ctx->size before every ISWHITESPACE() read, and make sure line->beg can never exceed ctx->size.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. With MD_FLAG_TASKLISTS, the check at 6096-6098 accepts a ']' that is the last byte (tmp+3 == ctx->size), so off = tmp+3 equals size at 6103. The loop at 6104-6105 ('while(ISWHITESPACE(off)) off++') reads CH(size) with no upper bound, so trailing spaces or tabs beyond the buffer keep it running. line->beg = off (6106) can then exceed size, and md_end_current_block reads CH(lines[0].beg) at 5040. That function runs for the final block at md_process_doc:6298. I traced '- [ ]' with no trailing newline: the one-byte read happens from the document alone. The unbounded case needs embedder bytes past the slice. In md2html the scan is bounded in practice, but in slice embedding its length is attacker-influenced and can run into unmapped memory, so a crash is possible. No bytes from past the buffer reach the output, because the sentinel check at 4146-4153 stops text emission. Keep MEDIUM.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_end_current_block",
+            "line_start": 5040,
+            "line_end": 6106
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_c129ab146f1aab01",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_is_html_block_end_condition",
+        "line_start": 5473,
+        "line_end": 5818
+      },
+      "description": "One-byte reads at ctx->text[size] in the ordered-list marker and HTML block end checks\n\nThree block-level checks read at or past ctx->size. (a) md_is_container_mark(): if an ordered-list digit run reaches the end of input (for example, a last line that is just 2025), off == ctx->size and line 5688 reads CH(off). A '.' or ')' there accepts an empty list item and sets *p_end = size+1 (line 5696). (b) md_is_html_block_end_condition() type 1: md_ascii_case_eq(STR(off), \"</script>\", 9) at lines 5473, 5478, and 5483 compares up to 9 bytes from a '<' near the end without checking off + len <= size. (c) Types 6 and 7 (line 5510) evaluate ISNEWLINE(beg) with beg == size. That happens when a whitespace-only last line follows an HTML block, because the indentation scan at line 5739 has already advanced off to size. The usual impact is one byte of undefined behavior or a parse that depends on memory past the end, and NUL-terminated buffers hide it. It can crash when the buffer ends on a page boundary.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "One-byte reads at ctx->text[size] in the ordered-list marker and HTML block end checks",
+      "lines": [
+        5473,
+        5478,
+        5483,
+        5510,
+        5684,
+        5688,
+        5696,
+        5739,
+        5818
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-oob-read",
+        "confidence": "high",
+        "recommendation": "Add off < ctx->size guards before the reads at lines 5688 and 5510. Bound the type-1 comparisons so each stays within ctx->size, for example with a remaining-length check before md_ascii_case_eq().",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed, with three distinct unguarded reads. (a) md_is_container_mark: the digit loop stops at max_end = ctx->size (5680-5683), then 5688 reads CH(size). If that byte is '.' or ')', 5696 accepts an empty list item and sets *p_end = size+1. (b) md_is_html_block_end_condition type 1: 5473, 5478, and 5483 call md_ascii_case_eq(STR(off), tag, n) with no off+n <= size check, so a trailing '<' or '</scr' reads up to about 8 bytes past the end. (c) Types 6 and 7 at 5510 evaluate ISNEWLINE(beg) with beg == size. This is reached when a whitespace-only final line follows a type 6/7 HTML block: md_line_indentation (5739) advances off to size, and the continuation check (5810-5818) runs before the blank check at 5840. These are undefined-behavior reads of bytes past the end. They are typically benign and carry a page-edge crash risk, with no direct effect on output. Keep BUG.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_is_html_block_end_condition",
+            "line_start": 5473,
+            "line_end": 5818
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_fa1ef47baaf25e34",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": null,
+        "line_start": 205,
+        "line_end": 1224
+      },
+      "description": "Scan-horizon caches persist across table cells, so raw HTML comments inside a cell can be rejected\n\nmd_scan_for_html_closer() returns FALSE early when off < *p_scan_horizon and *p_scan_horizon >= max_end - len (lines 1107-1111). The horizon lives in the document-wide context (fields at lines 205-208) and is set on failure (line 1126). It is never reset between the row-level analysis and the per-cell analysis that follows. Row analysis uses the full row end as max_end, so a failing comment scan at a later cell leaves a large horizon. When a cell is then analyzed with a smaller max_end, a legitimate comment closer in an earlier cell is skipped. Example: in the row '| <!-- --> | <!-- y |', the row pass recognizes '<!-- -->' as a comment, but the cell pass rejects it, so the comment is printed as escaped text. The failure mode is fail-closed, so this is a correctness bug, not an injection.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Scan-horizon caches persist across table cells, so raw HTML comments inside a cell can be rejected",
+      "lines": [
+        205,
+        206,
+        207,
+        208,
+        1098,
+        1107,
+        1108,
+        1109,
+        1110,
+        1111,
+        1126,
+        1155,
+        1156,
+        1178,
+        1179,
+        1202,
+        1203,
+        1223,
+        1224
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-logic-bug",
+        "confidence": "medium",
+        "recommendation": "Reset the four horizon fields at the start of md_analyze_inlines(), or key the cache on the line array and max_end so a cached result is reused only for the same region.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. The four horizon fields (204-208) are written only in md_scan_for_html_closer at 1126 and read at 1107-1111, and nothing resets them between passes (md_analyze_inlines at 4016-4055 resets only n_marks). The cache check assumes one max_end for the whole region, but table rows are analyzed twice: the row pass (md_process_table_row, 4479) uses the row end, and each cell pass (md_process_table_cell, 4458) uses the cell end. Tracing '| <!-- --> | <!-- y |', the second comment's failing scan in the row pass records html_comment_horizon = 20 (row end 21). In the first cell, '<!-- -->' spans 2-10, and md_scan_for_html_closer sees 6 < 20 and 20 >= 10-2, so it returns FALSE at 1107-1110 even though '--' at index 7 is inside the cell. The comment is then emitted as escaped text. This fails closed and does not inject anything, so it is a conformance bug, and it needs MD_FLAG_TABLES. Keep BUG.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": null,
+            "line_start": 205,
+            "line_end": 1224
+          },
+          "matched_by": "lines",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    },
+    {
+      "finding_id": "deepsec:finding_c6e16c2b0686f486",
+      "system": "deepsec",
+      "location": {
+        "file": "src/md4c.c",
+        "function": "md_collect_marks",
+        "line_start": 3228,
+        "line_end": 3240
+      },
+      "description": "Permissive URL autolink scan skips the byte right after the '//' separator\n\nIn md_collect_marks(), after a scheme match (lines 3228-3236), the code runs 'off += 1 + suffix_size; break;' and the loop then runs the common 'off++;' at line 3240. The byte right after '//' is therefore never examined as a mark. For example, in 'http://[a](b)' the '[' is never recorded, so no link is produced and the text stays literal, where a link is expected. The output stays escaped, so this is a conformance bug, not a security issue.",
+      "poc": null,
+      "patch": null,
+      "stack_trace": null,
+      "cybergym": null,
+      "title": "Permissive URL autolink scan skips the byte right after the '//' separator",
+      "lines": [
+        3228,
+        3232,
+        3234,
+        3235,
+        3236,
+        3240
+      ],
+      "native": {
+        "severity": "BUG",
+        "vulnSlug": "other-logic-bug",
+        "confidence": "high",
+        "recommendation": "Change 'off += 1 + suffix_size;' to 'off += suffix_size;', because the off++ that follows already accounts for the ':' position.",
+        "producedByRunId": "20261027123038-7a6921326bba00a4",
+        "triage": null,
+        "revalidation": {
+          "verdict": "true-positive",
+          "reasoning": "Confirmed. After a 'http://' or 'ftp://' scheme match, line 3235 sets off to the byte just after '//', and the common off++ at 3240 skips that byte, so it is never examined as a mark. Tracing 'http://[a](b)' shows the '[' is never recorded and no link forms, as the finding says. The finding's claim that output 'stays escaped' is wrong, though. In 'http://' followed by a backslash and then '<b>', the backslash is skipped, the '<' is treated as raw HTML, and '<b>' is emitted raw where the author escaped it. A skipped escape on an '<scheme:...>' sequence can likewise turn literal text into an autolink. No security boundary is crossed, because raw HTML and <...> autolinks are allowed by design and attackers can write them directly, so the impact is conformance and lost escaping. The existing permissive-url-autolinks tests have no special character directly after '//', which is why nothing catches it. It needs MD_FLAG_PERMISSIVEURLAUTOLINKS, which is not a default. The one-line fix 'off += suffix_size' is correct. Keep BUG.",
+          "revalidatedAt": "2026-10-27T13:04:13.109Z",
+          "runId": "20261027125205-5b62ec68f9c4b4bf",
+          "model": "claude-haiku-5-5"
+        }
+      },
+      "tp_target_check": {
+        "method": "location_overlap",
+        "result": "fail",
+        "evidence": {
+          "location": {
+            "file": "src/md4c.c",
+            "function": "md_collect_marks",
+            "line_start": 3228,
+            "line_end": 3240
+          },
+          "matched_by": "function",
+          "matching_hunks": []
+        }
+      },
+      "verdict": null
+    }
+  ]
+}

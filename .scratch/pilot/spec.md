@@ -1,6 +1,6 @@
 # Spec: CyberGym-E2E pilot of six VDP multi-agent systems
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 

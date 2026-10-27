@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] The runner can start a system in a runner container whose only exit is Squid to the proxy
 - [ ] Container events are logged per run; a run in which any container joins an internet-connected network gets isolation verdict `invalid`
@@ -12,3 +12,7 @@
 - [ ] A run that hits its cap ends with outcome `budget_exhausted`; one ended by a refusal ends with `refused`, and the refusal appears as a `refusal` step with its category
 - [ ] A logged allowlist mechanism exists for registry access during image builds (used by ticket 09)
 - [ ] Proxy tests cover the budget cap and refusal records (fake upstream)
+
+## Comments
+
+2026-10-27: Done on integration branch `integration/pilot` (head bd76bb2). Results, spend and remaining gaps are in `docs/pilot-report.md`; code-review fixes landed in `review/fixes`.

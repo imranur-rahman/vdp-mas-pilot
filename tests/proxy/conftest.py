@@ -7,6 +7,7 @@ fake Anthropic-format server on the host. No model spend.
 import json
 import os
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -17,8 +18,21 @@ import httpx
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-PROXY_PORT = 4100
-PHOENIX_PORT = 6106
+# Unique per session so that parallel worktrees can run seam-1 tests at once.
+PROJECT = f"pilot-test-{secrets.token_hex(3)}"
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+PROXY_PORT = _free_port()
+PHOENIX_PORT = _free_port()
+REFUSE_MARKER = "PLEASE-REFUSE"  # a request containing this gets a `cyber` refusal
+REFUSAL_DETAILS = {"type": "refusal", "category": "cyber",
+                   "explanation": "fake: could enable cyber harm"}
 
 
 class FakeUpstream:
@@ -32,15 +46,16 @@ class FakeUpstream:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 upstream.requests.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                refuse = REFUSE_MARKER in json.dumps(body.get("messages"))
                 if body.get("stream"):
-                    return self._stream(body)
+                    return self._stream(body, refuse)
+                content = [{"type": "thinking", "thinking": "fake summary", "signature": "sig"},
+                           {"type": "text", "text": "ok"}]
                 reply = json.dumps({
-                    "id": "msg_fake", "type": "message", "role": "assistant",
-                    "model": body.get("model"), "stop_reason": "end_turn", "stop_details": None,
-                    "content": [
-                        {"type": "thinking", "thinking": "fake summary", "signature": "sig"},
-                        {"type": "text", "text": "ok"},
-                    ],
+                    "id": "msg_fake", "type": "message", "role": "assistant", "model": body.get("model"),
+                    "stop_reason": "refusal" if refuse else "end_turn",
+                    "stop_details": REFUSAL_DETAILS if refuse else None,
+                    "content": [] if refuse else content,
                     "usage": {"input_tokens": 10, "output_tokens": 5,
                               "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
                 }).encode()
@@ -50,7 +65,7 @@ class FakeUpstream:
                 self.end_headers()
                 self.wfile.write(reply)
 
-            def _stream(self, body):
+            def _stream(self, body, refuse=False):
                 usage = {"input_tokens": 10, "output_tokens": 5,
                          "cache_read_input_tokens": 3, "cache_creation_input_tokens": 0}
                 events = [
@@ -69,8 +84,9 @@ class FakeUpstream:
                     ("content_block_delta", {"type": "content_block_delta", "index": 1,
                                              "delta": {"type": "text_delta", "text": "ok"}}),
                     ("content_block_stop", {"type": "content_block_stop", "index": 1}),
-                    ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
-                                       "usage": {"output_tokens": 5}}),
+                    ("message_delta", {"type": "message_delta", "delta": (
+                        {"stop_reason": "refusal", "stop_details": REFUSAL_DETAILS} if refuse
+                        else {"stop_reason": "end_turn"}), "usage": {"output_tokens": 5}}),
                     ("message_stop", {"type": "message_stop"}),
                 ]
                 self.send_response(200)
@@ -94,7 +110,7 @@ class FakeUpstream:
 
 def compose(env: dict, *args: str):
     r = subprocess.run(
-        ["sg", "docker", "-c", " ".join(["docker", "compose", "-p", "pilot-test", *args])],
+        ["sg", "docker", "-c", " ".join(["docker", "compose", "-p", PROJECT, *args])],
         cwd=REPO / "infra", env=env, capture_output=True, text=True,
     )
     if r.returncode:
@@ -123,7 +139,7 @@ def proxy(upstream, tmp_path_factory):
         "PILOT_RUNS_DIR": str(runs),
         "PILOT_PROXY_PORT": str(PROXY_PORT),
         "PILOT_PHOENIX_PORT": str(PHOENIX_PORT),
-        "PILOT_GATEWAY_IP": "127.0.0.3",
+        "PILOT_GATEWAY_IP": "127.0.0.3",  # forwarder binds PROXY_PORT here; unique per session
     }
     compose(env, "up", "-d", "--wait")
     base = f"http://127.0.0.1:{PROXY_PORT}"
@@ -144,21 +160,26 @@ def proxy(upstream, tmp_path_factory):
 
 @pytest.fixture
 def make_key(proxy):
-    def _make(**metadata) -> str:
+    def _make(max_budget: float = 1, **metadata) -> str:
         r = httpx.post(f"{proxy['base']}/key/generate",
                        headers={"Authorization": f"Bearer {proxy['master']}"},
-                       json={"metadata": metadata, "max_budget": 1}, timeout=30)
+                       json={"metadata": metadata, "max_budget": max_budget}, timeout=30)
         r.raise_for_status()
         return r.json()["key"]
     return _make
 
 
-def wait_for_log(path: Path, n: int = 1, timeout: float = 20) -> list[dict]:
-    """Logging hooks run after the response; poll until n records exist."""
+def wait_for_log(path: Path, n: int = 1, timeout: float = 20, with_requests: bool = False) -> list[dict]:
+    """Logging hooks run after the response; poll until n records exist.
+
+    `request` records (written for non-streamed calls before the call is
+    logged) are left out unless `with_requests`."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if path.exists():
             lines = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+            if not with_requests:
+                lines = [r for r in lines if r.get("record") != "request"]
             if len(lines) >= n:
                 return lines
         time.sleep(0.5)

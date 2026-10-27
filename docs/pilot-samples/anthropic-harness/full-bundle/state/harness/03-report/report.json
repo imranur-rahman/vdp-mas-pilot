@@ -1,0 +1,6 @@
+{
+  "bug_id": 0,
+  "from_run": 0,
+  "status": "agent_failed",
+  "error": "TypeError: 'int' object is not subscriptable"
+}

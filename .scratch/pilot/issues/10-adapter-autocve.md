@@ -4,10 +4,14 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Headless start script creates the project (local directory) and agent task and runs the pipeline to completion
 - [ ] Sandbox containers on no network or an internal one; isolation verdict `valid`
 - [ ] Agents labeled per D2; database state captured at hand-offs and at the end
 - [ ] PoC checked with CyberGym stage 1 and stack-trace overlap with the functions in `patch.diff`; findings normalized; or outcome `out_of_scope` with evidence
 - [ ] Changes kept as patch files; a development run, then one data run (both Claude Haiku 5.5), each producing a complete bundle
+
+## Comments
+
+2026-10-27: Done on integration branch `integration/pilot` (head bd76bb2). Results, spend and remaining gaps are in `docs/pilot-report.md`; code-review fixes landed in `review/fixes`.

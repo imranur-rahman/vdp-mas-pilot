@@ -1,0 +1,53 @@
+diff --git a/harness/sandbox.py b/harness/sandbox.py
+index fb5d226..a3a8a63 100644
+--- a/harness/sandbox.py
++++ b/harness/sandbox.py
+@@ -83,6 +83,7 @@ def agent_container(
+     (already carrying the CLI) instead of a vuln target to layer onto the
+     base — used by harnesses that build their own agent image, e.g. the DNR
+     hunt image whose docker context is the target's app/ tree."""
++    auth = _pilot_route(name, auth)  # vdp-mas-pilot: route claude -p to the LiteLLM proxy
+     img = target_tag if prebuilt else agent_image.ensure(target_tag)
+     container = docker_ops.run(
+         img,
+@@ -100,6 +101,40 @@ def agent_container(
+         docker_ops.rm(container)
+ 
+ 
++def _pilot_role(name: str) -> str:
++    """The pilot role an agent container's name maps to, for per-role proxy keys.
++    Order matters: the patch grader ('pgrade', '*_grade_it*') is told apart from
++    the find grader ('grader_*') before the generic 'grad' test."""
++    n = name.lower()
++    if "pgrade" in n or "_grade_it" in n:
++        return "patch-grade"
++    if "grad" in n:
++        return "grade"
++    for role in ("recon", "judge", "report", "patch", "find"):
++        if role in n:
++            return role
++    return "find"
++
++
++def _pilot_route(name: str, auth: dict[str, str] | None) -> dict[str, str] | None:
++    """vdp-mas-pilot (P3(a) model routing, D2 role labeling): point each agent's
++    ``claude -p`` at the LiteLLM proxy with the per-role virtual key that labels
++    its calls as finder, grader, reporter, patcher, etc. No-op unless the pilot
++    env is set, so upstream behaviour is unchanged outside the pilot."""
++    base = os.environ.get("PILOT_PROXY_URL")
++    if not base or auth is None:
++        return auth
++    import json as _json
++    keys = _json.loads(os.environ.get("PILOT_ROLE_KEYS") or "{}")
++    role = _pilot_role(name)
++    e = dict(auth)
++    e["ANTHROPIC_BASE_URL"] = base
++    if role in keys:
++        e.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
++        e["ANTHROPIC_API_KEY"] = keys[role]
++    return e
++
++
+ def container_env(auth: dict[str, str] | None) -> dict[str, str]:
+     """Env to set on the agent container at ``docker run`` time.
+ 

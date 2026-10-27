@@ -1,0 +1,212 @@
+--- a/reference/workflow.json
++++ b/reference/workflow.json (pilot, generated)
+@@ -3,14 +3,20 @@
+   "config": {
+     "db_path": "knowledge.db",
+     "retry_attempts": 3,
+-    "default_model": "vertex_ai/gemini-3.8-flash",
++    "default_model": "openai/pilot-mantis.default",
+     "reasoning_effort": "medium",
+     "timeout": 180,
+     "seed_prompt": "Initial Task Input: Evaluate {filepath}",
+     "sandbox": {
+-      "type": "static-only",
+-      "options": {}
+-    }
++      "type": "gvisor",
++      "options": {
++        "image": "<task build_image>",
++        "runtime": "runsc",
++        "container_tool": "docker",
++        "timeout_seconds": 1800
++      }
++    },
++    "api_base": "http://<gateway>:4000"
+   },
+   "budget": {
+     "max_wall_clock_seconds": 43200,
+@@ -24,7 +30,7 @@
+     {
+       "id": "history",
+       "type": "agent",
+-      "model": "vertex_ai/gemini-3.5-flash-lite",
++      "model": "openai/pilot-mantis.history",
+       "reasoning_effort": "low",
+       "tools": [
+         "get_git_log",
+@@ -33,19 +39,21 @@
+         "write_file",
+         "list_files",
+         "get_summary"
+-      ]
++      ],
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "structural_index",
+       "type": "agent",
+-      "model": "vertex_ai/gemini-3.5-flash-lite",
++      "model": "openai/pilot-mantis.structural_index",
+       "reasoning_effort": "low",
+       "tools": [
+         "read_file",
+         "write_file",
+         "list_files",
+         "run_sandbox"
+-      ]
++      ],
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "architect",
+@@ -57,7 +65,9 @@
+         "list_files",
+         "record_summary",
+         "get_summary"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.architect",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "threat_modeler",
+@@ -70,7 +80,9 @@
+         "get_summary",
+         "record_threat_model",
+         "get_threat_model"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.threat_modeler",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "planner",
+@@ -84,7 +96,9 @@
+         "get_threat_model",
+         "record_plan",
+         "get_plan"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.planner",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "researcher",
+@@ -104,7 +118,9 @@
+         "find_callees",
+         "get_function_boundary",
+         "record_regression_check"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.researcher",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "findings_gate",
+@@ -116,7 +132,7 @@
+     {
+       "id": "deduplicator",
+       "type": "agent",
+-      "model": "vertex_ai/gemini-3.5-flash-lite",
++      "model": "openai/pilot-mantis.deduplicator",
+       "reasoning_effort": "low",
+       "tools": [
+         "read_file",
+@@ -125,7 +141,8 @@
+         "get_findings",
+         "report_findings",
+         "dedupe_findings"
+-      ]
++      ],
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "reviewer",
+@@ -143,7 +160,9 @@
+         "record_regression_check"
+       ],
+       "output_schema": "ReviewVerdict",
+-      "output_key": "verdict"
++      "output_key": "verdict",
++      "model": "openai/pilot-mantis.reviewer",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "reviewer_classifier",
+@@ -166,7 +185,9 @@
+         "get_function_boundary"
+       ],
+       "output_schema": "CriticVerdict",
+-      "output_key": "verdict"
++      "output_key": "verdict",
++      "model": "openai/pilot-mantis.critic",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "critic_classifier",
+@@ -193,7 +214,9 @@
+       ],
+       "on_enter_status": "static_confirmed",
+       "output_schema": "ReproVerdict",
+-      "output_key": "verdict"
++      "output_key": "verdict",
++      "model": "openai/pilot-mantis.reproducer",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "repro_classifier",
+@@ -212,7 +235,9 @@
+         "get_findings",
+         "get_threat_model",
+         "record_exploit_chain"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.chainer",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "patcher",
+@@ -232,7 +257,9 @@
+         "find_callees",
+         "get_function_boundary"
+       ],
+-      "on_enter_status": "dynamic_confirmed"
++      "on_enter_status": "dynamic_confirmed",
++      "model": "openai/pilot-mantis.patcher",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "calibrator",
+@@ -246,7 +273,9 @@
+         "read_file",
+         "write_file"
+       ],
+-      "output_schema": "FindingCalibration"
++      "output_schema": "FindingCalibration",
++      "model": "openai/pilot-mantis.calibrator",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "reflector",
+@@ -257,7 +286,9 @@
+         "write_file",
+         "get_findings",
+         "record_learning"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.reflector",
++      "api_base": "http://<gateway>:4000"
+     },
+     {
+       "id": "reporter",
+@@ -271,7 +302,9 @@
+         "get_threat_model",
+         "get_summary",
+         "generate_report"
+-      ]
++      ],
++      "model": "openai/pilot-mantis.reporter",
++      "api_base": "http://<gateway>:4000"
+     }
+   ],
+   "edges": [
