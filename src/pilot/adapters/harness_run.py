@@ -23,6 +23,7 @@ and run in their native environment; no `/work` relocation is needed.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -35,7 +36,7 @@ from . import harness
 SYSTEM = "anthropic-harness"
 UPSTREAM = "https://github.com/anthropics/defending-code-reference-harness"
 COMMIT = "d3bea6b"  # HEAD at 2026-10-27; pin recorded in run.json
-SYSTEM_DIR = infra.REPO / "systems" / SYSTEM
+SYSTEM_DIR = infra.SYSTEMS / SYSTEM
 PATCHES = SYSTEM_DIR / "patches"
 # Roles that make model calls; each gets its own virtual key so the proxy labels
 # finder vs grader vs the rest (D2).
@@ -50,10 +51,10 @@ def _clone_and_install(workdir: Path) -> Path:
     subprocess.run(["git", "-C", str(src), "checkout", "-q", COMMIT], check=True)
     for patch in sorted(PATCHES.glob("*.patch")):
         subprocess.run(["git", "-C", str(src), "apply", str(patch)], check=True)
-    subprocess.run(["python3", "-m", "venv", str(workdir / "venv")], check=True)
-    py = workdir / "venv" / "bin" / "python3"
-    subprocess.run([str(py), "-m", "pip", "install", "-q", "--upgrade", "pip"], check=True)
-    subprocess.run([str(py), "-m", "pip", "install", "-q", "-e", str(src)], check=True)
+    uv = shutil.which("uv") or str(Path.home() / ".local" / "bin" / "uv")
+    subprocess.run([uv, "venv", "-q", "-p", "3.12", str(workdir / "venv")], check=True)
+    py = workdir / "venv" / "bin" / "python"
+    subprocess.run([uv, "pip", "install", "-q", "-p", str(py), "-e", str(src)], check=True)
     return py, src
 
 
@@ -199,7 +200,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         if batch is not None:
             # Patch the confirmed crashes (PoC + patch is what CyberGym validates).
             pr = subprocess.run(
-                [str(py), "-m", "harness.cli", "patch", str(batch), "--model", model, "--max-iterations", "3"],
+                [str(py), "-m", "harness.cli", "patch", str(batch), "--model", model,
+                 "--max-iterations", "3", "--targets-dir", str(target_dir.parent)],
                 cwd=harness_src, env=env, capture_output=True, text=True, timeout=timeout_s)
             (run_dir / "harness_patch.log").write_text(pr.stdout + "\n--- stderr ---\n" + pr.stderr)
         meta["agent_finished_at"] = time.time()

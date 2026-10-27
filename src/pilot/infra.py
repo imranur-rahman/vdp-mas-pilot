@@ -8,10 +8,15 @@ from pathlib import Path
 
 import httpx
 
-REPO = Path(__file__).resolve().parents[2]
+CODE = Path(__file__).resolve().parents[2]
+# The checkout that holds `.env`, task data, the CyberGym submodule, `runs/`
+# and the running proxy stack. PILOT_HOME lets code in a git worktree use the
+# main checkout's, so it neither restarts the shared proxy nor splits run folders.
+REPO = Path(os.environ.get("PILOT_HOME") or CODE).resolve()
+SYSTEMS = CODE / "systems"  # system adapter files live with the code (this worktree)
 CYBERGYM = REPO / "vendor" / "cybergym-e2e"
 CYBERGYM_SCRIPTS = CYBERGYM / "scripts"
-RUNS = REPO / "runs"
+RUNS = Path(os.environ.get("PILOT_RUNS_DIR") or REPO / "runs")
 # A second proxy stack (another worktree, a demo) can run beside the shared
 # one under its own compose project and port; the defaults are the shared stack.
 COMPOSE_PROJECT = os.environ.get("PILOT_COMPOSE_PROJECT", "pilot")
