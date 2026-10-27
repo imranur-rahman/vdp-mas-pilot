@@ -115,3 +115,20 @@ def test_streamed_thinking_is_kept_raw_and_linked_to_its_call(proxy, upstream, m
     call = next(r for r in recs if r["record"] == "call")
     assert "fake streamed summary" in "".join(map(str, stream["events"]))
     assert stream["litellm_call_id"] and stream["litellm_call_id"] == call["litellm_call_id"]
+
+
+def test_a_non_streamed_call_logs_the_request_it_carried(proxy, upstream, make_key):
+    # LiteLLM leaves `complete_input_dict` empty for non-streamed /v1/messages
+    # calls (VVAH's DeepAgents route), so the proxy logs the request itself.
+    key = make_key(pilot_run_id="t-request", pilot_run_kind="dev")
+    tools = [{"name": "read_file", "description": "read", "input_schema": {"type": "object"}}]
+    r = messages(proxy, key, system=[{"type": "text", "text": "You are the verifier."}], tools=tools)
+    assert r.status_code == 200, r.text
+    records = wait_for_log(proxy["runs"] / "t-request" / "proxy.jsonl", n=2, with_requests=True)
+    call = next(x for x in records if x["record"] == "call")
+    request = next(x for x in records if x["record"] == "request")
+    assert request["litellm_call_id"] == call["litellm_call_id"]
+    assert request["body"]["system"] == [{"type": "text", "text": "You are the verifier."}]
+    assert request["body"]["messages"] == [{"role": "user", "content": "hi"}]
+    assert request["body"]["tools"] == tools
+    assert not {"metadata", "litellm_metadata", "proxy_server_request"} & set(request["body"])

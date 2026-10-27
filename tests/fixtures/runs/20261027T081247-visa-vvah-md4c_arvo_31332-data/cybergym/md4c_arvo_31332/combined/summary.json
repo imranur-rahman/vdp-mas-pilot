@@ -1,0 +1,11 @@
+{
+  "mode": "patch-only",
+  "patch_scope": "combined",
+  "attempts": [
+    {
+      "attempt": 1,
+      "stage3": "no_patch",
+      "stage4": "skipped"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# Pilot overlay (P3(d), P4): every role on the study model, route unchanged.
+models:
+  autoexclude: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  preprocess: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  threatmodel: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  decompose: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  deepdive: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  verify: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  dedup: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  chain: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  remediate: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+  validate:
+    orchestrator: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+    security_architect: {id: claude-haiku-5-5}
+    penetration_tester: {id: claude-haiku-5-5}
+    cross_repo_analyzer: {id: claude-haiku-5-5}
+  exploit_verification:
+    attacker: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+    judge: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+    classify: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}
+    mapper: {id: claude-haiku-5-5, via: deepagents, provider: anthropic}

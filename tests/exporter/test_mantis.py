@@ -114,47 +114,28 @@ def test_a_knowledge_store_finding_with_a_patch_becomes_a_normalized_finding(tmp
     assert f["poc"] is None
 
 
-# --- classifier gates become code_decision steps ------------------------------
+# --- classifier gates and hand-offs (run-root handoffs.jsonl, ticket 05 format)
 
-def test_each_classifier_gate_decision_becomes_a_code_decision_step(tmp_path):
+def test_mantis_gates_and_handoffs_become_code_decision_and_handoff_steps(tmp_path):
     run_dir = run_folder(tmp_path)
-    write_collector(run_dir, "gates.jsonl",
-        {"gate": "findings_gate", "visit": 1, "decision": "researcher",
-         "reason": "no findings yet; keep searching", "ts": 1000.0},
-        {"gate": "repro_classifier", "visit": 1, "decision": "patcher",
-         "reason": "PoC reproduced the crash", "ts": 2000.0})
-
-    bundle = export(run_dir, tasks_dir=TASKS)
-    gates = of_type(bundle, "code_decision")
-
-    assert len(gates) == 2
-    assert [g["role"] for g in gates] == ["findings_gate", "repro_classifier"]
-    assert "patcher" in gates[1]["output"]
-    assert "PoC reproduced" in gates[1]["output"]
-    assert [g["seq"] for g in gates] == sorted(g["seq"] for g in gates)
-
-
-# --- knowledge-store hand-offs become handoff steps ---------------------------
-
-def test_each_handoff_captures_the_knowledge_store_into_the_bundle(tmp_path):
-    run_dir = run_folder(tmp_path)
-    snap = run_dir / "collector/state/0001-researcher.sqlite"
+    snap = run_dir / "state/0001-researcher-knowledge.sqlite"
     snap.parent.mkdir(parents=True)
     snap.write_bytes(b"SQLite format 3\x00 snapshot")
-    (run_dir / "collector/state/0001-researcher.diff").write_text("--- a\n+++ b\n")
-    write_collector(run_dir, "handoffs.jsonl", {
-        "from_role": "researcher", "to_role": "reviewer", "ts": 1500.0,
-        "db_snapshot": "collector/state/0001-researcher.sqlite",
-        "file_diff": "collector/state/0001-researcher.diff",
-        "note": "researcher passed 3 findings to reviewer"})
+    (run_dir / "handoffs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in mantis.handoff_records(
+        gates=[{"gate": "repro_classifier", "decision": "patcher", "reason": "PoC reproduced the crash",
+                "ts": 2000.0}],
+        handoffs=[{"from_role": "researcher", "to_role": "reviewer", "ts": 1500.0,
+                   "db_snapshot": "state/0001-researcher-knowledge.sqlite"}])))
 
     bundle = export(run_dir, tasks_dir=TASKS)
     (h,) = of_type(bundle, "handoff")
+    (g,) = of_type(bundle, "code_decision")
 
-    assert h["role"] == "reviewer"
-    assert h["state_ref"]["from"] == "researcher" and h["state_ref"]["to"] == "reviewer"
+    assert h["role"] == "reviewer" and "researcher" in h["output"]
     assert (bundle / h["state_ref"]["db_snapshot"]).read_bytes().startswith(b"SQLite format 3")
-    assert (bundle / h["state_ref"]["file_diff"]).is_file()
+    assert g["role"] == "repro_classifier"
+    assert "patcher" in g["output"] and "PoC reproduced" in g["output"]
+    assert h["seq"] < g["seq"]  # time-ordered
 
 
 # --- sandbox PoC runs become oracle_run steps ---------------------------------
@@ -179,8 +160,6 @@ def test_a_run_with_no_collector_folder_gets_no_collector_steps(tmp_path):
     """CyberGym's own agents have no `collector/`, so their bundles are unchanged."""
     run_dir = run_folder(tmp_path)
     bundle = export(run_dir, tasks_dir=TASKS)
-    assert of_type(bundle, "code_decision") == []
-    assert of_type(bundle, "handoff") == []
     assert of_type(bundle, "oracle_run") == []
 
 

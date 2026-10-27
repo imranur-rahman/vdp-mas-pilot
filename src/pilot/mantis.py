@@ -10,18 +10,16 @@ and by their system-prompt hash (D2). Findings live in a SQLite knowledge store.
 The proxy sees every model call. What it cannot see, and this collector writes
 to the run folder for the exporter (seam 2, docs/DECISIONS.md T-2/T-5/D5):
 
-    collector/gates.jsonl      one classifier-gate decision per line -> code_decision
-    collector/handoffs.jsonl   one knowledge-store hand-off per line -> handoff (+ state_ref)
+    handoffs.jsonl             classifier gates (code_decision) and node hand-offs (handoff),
+                               time-ordered, in the run-root format of ticket 05
+    state/                     knowledge-store copies captured at hand-offs and at the end (D5)
     collector/oracle_runs.jsonl one sandbox/PoC execution per line   -> oracle_run
     collector/adk_spans.jsonl  one ADK agent span per line           -> role on each llm_step
     knowledge.sqlite           the final knowledge store             -> findings.json (F-1)
-    collector/state/<seq>/     the state captured at each hand-off (db copy + file diff)
 
 `write_findings` turns the knowledge store into `<run folder>/findings.json`,
 which `pilot.verdicts` then checks (F-1). The collector-step and span readers
-used by the exporter are `gate_steps`, `handoff_steps`, `oracle_run_steps`, and
-`join_adk_roles`; all read only the run folder, so they are pure and tested at
-seam 2 (tests/exporter/test_mantis.py). The run step (`run_mantis`) is accepted
+(`handoff_records`, `pilot_workflow`) are pure and tested at seam 2 (tests/exporter/test_mantis.py). The run step (`run_mantis`) is accepted
 by a real run, not by these tests.
 """
 
@@ -334,24 +332,42 @@ def _validate(run_dir: Path, out: Path, task: str, build_image: str) -> str | No
     return str((out / "summary.json").relative_to(run_dir))
 
 
+def handoff_records(gates: list[dict], handoffs: list[dict]) -> list[dict]:
+    """Mantis gate decisions and node hand-offs as the run-root `handoffs.jsonl`
+    records the exporter reads (ticket 05 format: step_type, role, summary, t,
+    state_ref), in time order. A classifier gate is a `code_decision`."""
+    out = []
+    for g in gates:
+        summary = f"gate `{g['gate']}` routed to: {g.get('decision')}"
+        if g.get("reason"):
+            summary += f"\nreason: {g['reason']}"
+        out.append({"step_type": "code_decision", "role": g["gate"], "summary": summary,
+                    "t": g.get("ts"), "state_ref": {}})
+    for h in handoffs:
+        ref = {"from": h["from_role"], "to": h["to_role"]}
+        if h.get("db_snapshot"):
+            ref["db_snapshot"] = h["db_snapshot"]
+        out.append({"step_type": "handoff", "role": h["to_role"],
+                    "summary": h.get("note") or f"{h['from_role']} handed the knowledge store to {h['to_role']}",
+                    "t": h.get("ts"), "state_ref": ref})
+    return sorted(out, key=lambda r: r["t"] or 0)
+
+
 def derive_collector(run_dir: Path, sessions_db: Path, knowledge_db: Path) -> None:
-    """Best-effort Layer-2 collector files from Mantis's ADK session store and
-    knowledge DB: ADK agent spans, classifier-gate decisions, hand-off state
-    snapshots, and sandbox runs. Refined against a real run; absent inputs just
-    leave the corresponding collector file out."""
-    collector = run_dir / COLLECTOR
-    collector.mkdir(exist_ok=True)
-    (collector / "state").mkdir(exist_ok=True)
-    # End-of-run knowledge store, the final hand-off state (D5).
-    final_snap = f"collector/state/final-knowledge.sqlite"
+    """Layer-2 collector files from Mantis's ADK session store and knowledge DB:
+    run-root `handoffs.jsonl` (gates + hand-offs) with `state/`, and
+    `collector/adk_spans.jsonl` / `collector/oracle_runs.jsonl`. The final
+    knowledge store is the last hand-off's state (D5)."""
+    (run_dir / "state").mkdir(exist_ok=True)
+    final_snap = "state/final-knowledge.sqlite"
     shutil.copyfile(knowledge_db, run_dir / final_snap)
     spans, gates, handoffs, oracle = _read_sessions(sessions_db)
-    _dump(collector / "adk_spans.jsonl", spans)
-    _dump(collector / "gates.jsonl", gates)
-    if handoffs:
-        handoffs[-1].setdefault("db_snapshot", final_snap)
-    _dump(collector / "handoffs.jsonl", handoffs)
-    _dump(collector / "oracle_runs.jsonl", oracle)
+    handoffs.append({"from_role": handoffs[-1]["to_role"] if handoffs else "mantis", "to_role": "end",
+                     "ts": time.time(), "db_snapshot": final_snap, "note": "end of run: final knowledge store"})
+    _dump(run_dir / "handoffs.jsonl", handoff_records(gates, handoffs))
+    (run_dir / COLLECTOR).mkdir(exist_ok=True)
+    _dump(run_dir / COLLECTOR / "adk_spans.jsonl", spans)
+    _dump(run_dir / COLLECTOR / "oracle_runs.jsonl", oracle)
 
 
 def _read_sessions(sessions_db: Path):
