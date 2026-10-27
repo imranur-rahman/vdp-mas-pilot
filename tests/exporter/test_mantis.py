@@ -234,3 +234,91 @@ def test_pilot_workflow_routes_every_agent_node_through_the_proxy(tmp_path):
     assert sb["type"] == "gvisor"
     assert sb["options"]["image"] == "base-builder@sha256:abc"
     assert sb["options"]["runtime"] == "runsc"
+
+
+# --- the real ADK session store (events.event_data, ADK 2.11) -> collector -----
+
+def adk_sessions(path: Path, events: list[dict]) -> Path:
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE events (id TEXT, app_name TEXT, user_id TEXT, session_id TEXT,"
+                 " invocation_id TEXT, timestamp REAL, event_data TEXT)")
+    for i, e in enumerate(events):
+        conn.execute("INSERT INTO events VALUES (?,?,?,?,?,?,?)",
+                     (str(i), "mantis_graph", "user1", "s1", "inv", e["timestamp"], json.dumps(e)))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def ev(author, node, t, **kw):
+    return {"author": author, "timestamp": t, "node_info": {"path": f"pipeline@1/{node}"},
+            "actions": kw.pop("actions", {}), "content": kw.pop("content", None), **kw}
+
+
+def test_adk_events_give_gates_handoffs_sandbox_runs_and_call_roles(tmp_path):
+    db = adk_sessions(tmp_path / "sessions.sqlite", [
+        ev("researcher", "researcher@1", 10.0),
+        ev("researcher", "researcher@1", 12.0, actions={"end_of_agent": True}),
+        ev("pipeline", "findings_gate@1", 13.0, actions={"route": "has_findings"}),
+        ev("reproducer", "reproducer@1", 20.0, content={"parts": [{"function_call": {
+            "id": "fc1", "name": "run_sandbox", "args": {"command": "./fuzz poc.bin"}}}]}),
+        ev("reproducer", "reproducer@1", 25.0, content={"parts": [{"function_response": {
+            "id": "fc1", "name": "run_sandbox", "response": {"result": "AddressSanitizer: heap-buffer-overflow"}}}]}),
+        ev("reproducer", "reproducer@1", 26.0, actions={"end_of_agent": True}),
+    ])
+    calls = [{"record": "call", "litellm_call_id": "c1", "start_time": 11.0, "end_time": 11.5,
+              "pilot": {"pilot_requested_model": "pilot-mantis.researcher"}},
+             {"record": "call", "litellm_call_id": "c2", "start_time": 21.0, "end_time": 22.0,
+              "pilot": {"pilot_requested_model": "pilot-mantis.reproducer"}}]
+
+    spans, gates, handoffs, oracle = mantis.read_sessions(db, calls, classifiers={"findings_gate"})
+
+    assert [(s["call_id"], s["role"]) for s in spans] == [("c1", "researcher"), ("c2", "reproducer")]
+    assert spans[1]["adk_path"] == "pipeline@1/reproducer@1"
+    assert gates == [{"gate": "findings_gate", "visit": 1, "decision": "has_findings", "reason": None, "ts": 13.0}]
+    assert [(h["from_role"], h["to_role"]) for h in handoffs] == [("researcher", "reproducer"), ("reproducer", "end")]
+    (o,) = oracle
+    assert o["tool"] == "run_sandbox" and o["command"] == "./fuzz poc.bin"
+    assert o["crashed"] is True and o["ts_start"] == 20.0 and o["ts_end"] == 25.0
+
+
+# --- OpenAI-format calls (Mantis's litellm client uses /chat/completions) -------
+
+def _chunk(delta=None, finish=None, usage=None):
+    c = {"object": "chat.completion.chunk", "model": "anthropic/claude-haiku-5.5",
+         "choices": [{"index": 0, "finish_reason": finish, "delta": delta or {}}]}
+    if usage:
+        c["usage"] = usage
+    return c
+
+
+def test_an_openai_format_streamed_call_becomes_a_full_llm_step(tmp_path):
+    from pilot.outcomes import run_outcome
+    run_dir = run_folder(tmp_path)
+    body = {"model": "anthropic/claude-haiku-5.5", "system": "You are the reproducer.",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "reproduce f001"}]}]}
+    call = {"record": "call", "litellm_call_id": "c1", "start_time": "2026-10-27 12:00:00.0",
+            "end_time": "2026-10-27 12:00:02.0", "upstream_request": json.dumps(body),
+            "pilot": {"pilot_prompt_hash": "h_rep", "pilot_requested_model": "pilot-mantis.reproducer"},
+            "response": {}}
+    usage = {"prompt_tokens": 100, "completion_tokens": 20, "cache_read_input_tokens": 60,
+             "cache_creation_input_tokens": 5, "cost": 0.0012}
+    stream = {"record": "stream", "litellm_call_id": "c1", "events": [
+        _chunk({"role": "assistant", "reasoning_content": "Build the fuzzer first."}),
+        _chunk({"content": "Running it."}),
+        _chunk({"tool_calls": [{"index": 0, "id": "toolu_1", "function": {"name": "run_sandbox", "arguments": ""}}]}),
+        _chunk({"tool_calls": [{"index": 0, "function": {"arguments": '{"command": "./fuzz'}}]}),
+        _chunk({"tool_calls": [{"index": 0, "function": {"arguments": ' poc.bin"}'}}]}),
+        _chunk(finish="tool_calls"),
+        _chunk(usage=usage)]}
+    (run_dir / "proxy.jsonl").write_text(json.dumps(call) + "\n" + json.dumps(stream) + "\n")
+
+    (s,) = of_type(export(run_dir, tasks_dir=TASKS), "llm_step")
+
+    assert s["output"] == "Running it."
+    assert s["thinking_summary"]["text"] == "Build the fuzzer first."
+    assert [(t["name"], t["args"]) for t in s["tool_calls"]] == [("run_sandbox", {"command": "./fuzz poc.bin"})]
+    assert s["tokens"] == {"input": 100, "output": 20, "cache_read": 60, "cache_write": 5}
+    assert s["cost_usd"] == 0.0012 and s["stop_reason"] == "tool_use"
+    assert s["input_delta"][0]["content"][0]["text"] == "reproduce f001"
+    assert run_outcome(run_dir)["cost_usd_openrouter"] == 0.0012

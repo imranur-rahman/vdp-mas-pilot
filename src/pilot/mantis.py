@@ -24,6 +24,7 @@ by a real run, not by these tests.
 """
 
 import json
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -39,6 +40,7 @@ NODE_ALIAS = "openai/pilot-mantis."  # per-node model alias prefix (role label, 
 # Long enough for the reproducer to compile and run the OSS-Fuzz target inside
 # the gVisor sandbox (Mantis's default is 30s, far too short for a real build).
 SANDBOX_TIMEOUT_S = 1800
+MAX_OUTPUT_TOKENS = 32000
 
 
 # --- per-node routing to the proxy (D2, box 1) --------------------------------
@@ -247,7 +249,10 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
            "--db", "/output/knowledge.sqlite", "--max-time", f"{max(timeout_s // 60 - 5, 5)}m"]
     env = {"OPENAI_API_KEY": key, "MANTIS_SESSIONS_DB": "/output/sessions.sqlite",
            "DOCKER_HOST": "unix:///var/run/docker.sock",
-           "LITELLM_LOCAL_MODEL_COST_MAP": "True"}
+           "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+           # Mantis sizes max_tokens from its model catalog; the per-node alias
+           # is not in it, so dev run 3 truncated tool calls at 4096 (MAX_TOKENS).
+           "LLM_MAX_TOKENS": str(MAX_OUTPUT_TOKENS)}
 
     error, exit_code = None, None
     with isolation.ContainerEventLog(run_dir) as events:
@@ -264,7 +269,7 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
                      "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"}})
         meta["runner_container"] = container.name
         try:
-            exit_code = container.wait(timeout=timeout_s)["StatusCode"]
+            exit_code = _wait_capturing(container, run_dir, work, timeout_s)
         except Exception as e:
             error = repr(e)
             container.stop(timeout=10)
@@ -297,6 +302,7 @@ def collect_outputs(run_dir: Path, work: Path, task: str, repo: str, build_image
     db = work / "output" / "knowledge.sqlite"
     if not db.is_file():
         return {"adapter": "no knowledge store produced", "mantis_findings": 0}
+    derive_collector(run_dir, work / "output" / "sessions.sqlite", db)
     shutil.copyfile(db, run_dir / KNOWLEDGE_DB)
 
     findings = findings_from_db(db)
@@ -318,7 +324,6 @@ def collect_outputs(run_dir: Path, work: Path, task: str, repo: str, build_image
                          "poc": str((out / "poc.bin").relative_to(run_dir)) if poc_src else None}
 
     write_findings(run_dir, db, cybergym_summary=summary_ref, pocs=pocs, source_root=work / "src")
-    derive_collector(run_dir, work / "output" / "sessions.sqlite", db)
     return {"mantis_findings": len(findings), "validated": bool(summary_ref)}
 
 
@@ -371,69 +376,192 @@ def handoff_records(gates: list[dict], handoffs: list[dict]) -> list[dict]:
                     "t": g.get("ts"), "state_ref": {}})
     for h in handoffs:
         ref = {"from": h["from_role"], "to": h["to_role"]}
-        if h.get("db_snapshot"):
-            ref["db_snapshot"] = h["db_snapshot"]
+        for key in ("db_snapshot", "files_diff"):
+            if h.get(key):
+                ref[key] = h[key]
         out.append({"step_type": "handoff", "role": h["to_role"],
                     "summary": h.get("note") or f"{h['from_role']} handed the knowledge store to {h['to_role']}",
                     "t": h.get("ts"), "state_ref": ref})
     return sorted(out, key=lambda r: r["t"] or 0)
 
 
+def classifier_ids() -> set[str]:
+    return {n["id"] for n in _base_workflow()["nodes"] if n.get("type") == "classifier"}
+
+
+def _wait_capturing(container, run_dir: Path, work: Path, timeout_s: int) -> int:
+    """Wait for Mantis, capturing state at every agent hand-off (D5): when an
+    agent node ends (ADK `end_of_agent`), copy the knowledge store and diff the
+    source tree it may have written to."""
+    deadline, seen = time.time() + timeout_s, set()
+    classifiers = classifier_ids()
+    while True:
+        container.reload()
+        _capture_handoffs(run_dir, work, seen, classifiers)
+        if container.status in ("exited", "dead"):
+            break
+        if time.time() > deadline:
+            raise TimeoutError(f"mantis exceeded {timeout_s}s")
+        time.sleep(3)
+    _capture_handoffs(run_dir, work, seen, classifiers)
+    return container.wait(timeout=60)["StatusCode"]
+
+
+def _capture_handoffs(run_dir: Path, work: Path, seen: set, classifiers: set[str]) -> None:
+    out = work / "output"
+    try:
+        events = session_events(out / "sessions.sqlite")
+    except sqlite3.Error:
+        return  # mid-write; next poll
+    for e in events:
+        node = e["_node"]
+        if not ((e.get("actions") or {}).get("end_of_agent") and node and node not in classifiers
+                and e.get("author") == node):
+            continue
+        label = f"{node}@{e['_visit']}"
+        if label in seen:
+            continue
+        seen.add(label)
+        capture_state(run_dir, work, label, from_role=node, ts=e.get("timestamp"))
+
+
+def capture_state(run_dir: Path, work: Path, label: str, *, from_role: str | None, ts) -> dict:
+    """One capture: a consistent copy of the knowledge store (SQLite backup API)
+    and a diff of the source tree against the previous capture (pilot.state)."""
+    from . import state
+    db = work / "output" / "knowledge.sqlite"
+    files = {f"src/{p.relative_to(work / 'src')}": p.read_bytes()
+             for p in (work / "src").rglob("*") if p.is_file() and p.stat().st_size < 2_000_000}
+    entry = state.capture(run_dir, label, files, from_role=from_role, ts=ts)
+    if db.is_file():
+        snap = run_dir / "state" / f"{entry['seq']:02d}-{label.replace('@', '-')}-knowledge.sqlite"
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as src, sqlite3.connect(snap) as dst:
+            src.backup(dst)
+        entry["db_snapshot"] = str(snap.relative_to(run_dir))
+    caps = run_dir / "state" / "captures.jsonl"
+    with caps.open("a") as f:
+        f.write(json.dumps({**entry, "label": label}) + "\n")
+    return entry
+
+
 def derive_collector(run_dir: Path, sessions_db: Path, knowledge_db: Path) -> None:
-    """Layer-2 collector files from Mantis's ADK session store and knowledge DB:
-    run-root `handoffs.jsonl` (gates + hand-offs) with `state/`, and
-    `collector/adk_spans.jsonl` / `collector/oracle_runs.jsonl`. The final
-    knowledge store is the last hand-off's state (D5)."""
-    (run_dir / "state").mkdir(exist_ok=True)
-    final_snap = "state/final-knowledge.sqlite"
-    shutil.copyfile(knowledge_db, run_dir / final_snap)
-    spans, gates, handoffs, oracle = _read_sessions(sessions_db)
-    handoffs.append({"from_role": handoffs[-1]["to_role"] if handoffs else "mantis", "to_role": "end",
-                     "ts": time.time(), "db_snapshot": final_snap, "note": "end of run: final knowledge store"})
+    """Layer-2 collector files from Mantis's ADK session store, the proxy log
+    and the live captures: run-root `handoffs.jsonl` (gates + hand-offs, with
+    each hand-off's captured state), `collector/adk_spans.jsonl` and
+    `collector/oracle_runs.jsonl`. The end of the run is the last capture (D5)."""
+    from .exporter import load_proxy_log
+    work = run_dir / "workspace"
+    capture_state(run_dir, work, "end", from_role=None, ts=time.time())
+    caps = {}
+    for line in (run_dir / "state" / "captures.jsonl").read_text().splitlines():
+        c = json.loads(line)
+        caps[c["label"]] = c
+    calls = [r for r in load_proxy_log(run_dir) if r.get("record") == "call"]
+    spans, gates, handoffs, oracle = read_sessions(sessions_db, calls, classifier_ids())
+    for h in handoffs:
+        c = caps.get(h.pop("label", None)) or {}
+        h["db_snapshot"], h["files_diff"] = c.get("db_snapshot"), c.get("diff")
+    end = {"db_snapshot": caps["end"].get("db_snapshot"), "files_diff": caps["end"].get("diff")}
+    if handoffs and handoffs[-1]["to_role"] == "end":  # the last node's hand-off ends the run
+        handoffs[-1].update(end, note=f"{handoffs[-1]['from_role']} ended the run: final knowledge store and source tree")
+    else:
+        handoffs.append({"from_role": handoffs[-1]["to_role"] if handoffs else SYSTEM, "to_role": "end",
+                         "ts": caps["end"]["ts"], **end, "note": "end of run: final knowledge store and source tree"})
     _dump(run_dir / "handoffs.jsonl", handoff_records(gates, handoffs))
     (run_dir / COLLECTOR).mkdir(exist_ok=True)
     _dump(run_dir / COLLECTOR / "adk_spans.jsonl", spans)
-    _dump(run_dir / COLLECTOR / "oracle_runs.jsonl", oracle)
+    _dump(run_dir / COLLECTOR / "oracle_runs.jsonl",
+          [{**o, "stdout_ref": None} for o in oracle])
 
 
-def _read_sessions(sessions_db: Path):
-    """ADK events -> (adk spans, gate decisions, hand-offs, sandbox runs).
+SANDBOX_TOOLS = ("run_sandbox", "run_sandbox_with_evidence")
+_CRASH = re.compile(r"AddressSanitizer|UndefinedBehaviorSanitizer|MemorySanitizer|LeakSanitizer|"
+                    r"SUMMARY: \w+Sanitizer|Segmentation fault|SIGSEGV|SIGABRT")
 
-    ADK's SqliteSessionService keeps one row per event with its author (the
-    agent/node), timestamp, and content. The exact schema is confirmed against
-    a real run; until then this reads defensively and returns what it finds."""
+
+def session_events(sessions_db: Path) -> list[dict]:
+    """ADK 2.11 session events (`events.event_data` JSON), in time order, with
+    the graph node and visit parsed from `node_info.path` (`.../<node>@<visit>`)."""
     if not Path(sessions_db).is_file():
-        return [], [], [], []
-    spans, gates, handoffs, oracle = [], [], [], []
-    try:
-        with sqlite3.connect(sessions_db) as conn:
-            conn.row_factory = sqlite3.Row
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(events)")}
-            if not cols:
-                return [], [], [], []
-            rows = [dict(r) for r in conn.execute("SELECT * FROM events ORDER BY timestamp ASC")]
-    except sqlite3.Error:
-        return [], [], [], []
-    prev = None
-    for r in rows:
-        author = r.get("author") or r.get("agent")
-        ts = r.get("timestamp")
-        spans.append({"name": author, "role": author, "ts_start": ts, "ts_end": ts})
-        if author and ("classifier" in author or "gate" in author):
-            gates.append({"gate": author, "visit": 1, "decision": None,
-                          "reason": _text_of(r), "ts": ts})
-        if prev and author and author != prev:
-            handoffs.append({"from_role": prev, "to_role": author, "ts": ts})
-        if author:
-            prev = author
+        return []
+    uri = f"file:{sessions_db}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as conn:
+        rows = [json.loads(r[0]) for r in conn.execute("SELECT event_data FROM events ORDER BY timestamp")]
+    for e in rows:
+        path = (e.get("node_info") or {}).get("path") or ""
+        leaf = path.rsplit("/", 1)[-1]
+        node, _, visit = leaf.partition("@")
+        e["_path"], e["_node"], e["_visit"] = path, node or None, int(visit) if visit.isdigit() else None
+    return rows
+
+
+def read_sessions(sessions_db: Path, calls: list[dict], classifiers: set[str]):
+    """ADK events + the proxy's call records -> (adk spans, gate decisions,
+    hand-offs, sandbox runs) for the collector files.
+
+    Spans are keyed by `litellm_call_id`: each call's node comes from the
+    per-node alias it was sent with (`pilot-mantis.<node>`), and the ADK node
+    visit whose events cover the call's time gives `adk_path`."""
+    from .exporter import _ts
+
+    events = session_events(sessions_db)
+    visits: dict[str, list[float]] = {}
+    for e in events:
+        if e["_node"] and e.get("timestamp") is not None:
+            visits.setdefault(e["_path"], []).append(e["timestamp"])
+
+    spans = []
+    for c in calls:
+        alias = (c.get("pilot") or {}).get("pilot_requested_model") or ""
+        if not alias.startswith(NODE_ALIAS.split("/", 1)[1]):
+            continue
+        role = alias.split(".", 1)[1]
+        t0, t1 = _ts(c.get("start_time")), _ts(c.get("end_time"))
+        path = _visit_at(visits, role, t0)
+        spans.append({"call_id": c.get("litellm_call_id"), "role": role, "name": role,
+                      "adk_path": path, "ts_start": t0, "ts_end": t1})
+
+    gates, handoffs, oracle, pending = [], [], [], {}
+    agent_order = [e for e in events if e["_node"] and e["_node"] not in classifiers
+                   and e.get("author") not in (None, "user") and e["_node"] == e.get("author")]
+    for i, e in enumerate(events):
+        actions = e.get("actions") or {}
+        if e["_node"] in classifiers and actions.get("route"):
+            gates.append({"gate": e["_node"], "visit": e["_visit"], "decision": actions["route"],
+                          "reason": None, "ts": e.get("timestamp")})
+        if actions.get("end_of_agent") and e["_node"] and e["_node"] not in classifiers \
+                and e.get("author") == e["_node"]:
+            nxt = next((a for a in agent_order
+                        if a.get("timestamp", 0) > e.get("timestamp", 0) and a["_node"] != e["_node"]), None)
+            # timed at receipt, so a gate that routed between the two comes first
+            handoffs.append({"from_role": e["_node"], "to_role": nxt["_node"] if nxt else "end",
+                             "ts": nxt["timestamp"] if nxt else e.get("timestamp"),
+                             "captured_at": e.get("timestamp"), "label": f"{e['_node']}@{e['_visit']}"})
+        for part in ((e.get("content") or {}).get("parts") or []):
+            fc, fr = part.get("function_call"), part.get("function_response")
+            if fc and fc.get("name") in SANDBOX_TOOLS:
+                pending[fc.get("id")] = {"tool": fc["name"], "command": (fc.get("args") or {}).get("command"),
+                                         "args": fc.get("args"), "ts_start": e.get("timestamp"), "role": e["_node"]}
+            if fr and fr.get("id") in pending:
+                run = pending.pop(fr["id"])
+                text = json.dumps(fr.get("response"))
+                run.update(ts_end=e.get("timestamp"), output=text[:20000],
+                           crashed=bool(_CRASH.search(text)), exit_code=_exit_code(fr.get("response")))
+                oracle.append(run)
     return spans, gates, handoffs, oracle
 
 
-def _text_of(row: dict) -> str | None:
-    content = row.get("content")
-    if isinstance(content, (bytes, str)):
-        return content.decode() if isinstance(content, bytes) else content
-    return None
+def _visit_at(visits: dict[str, list[float]], node: str, t: float | None) -> str | None:
+    mine = [(p, ts) for p, ts in visits.items() if p.rsplit("/", 1)[-1].partition("@")[0] == node]
+    if not mine or t is None:
+        return mine[-1][0] if mine else None
+    started = [(p, ts) for p, ts in mine if min(ts) - 5 <= t] or mine
+    return min(started, key=lambda pt: abs(t - max(min(pt[1]), min(t, max(pt[1])))))[0]
+
+
+def _exit_code(response) -> int | None:
+    m = re.search(r"exit(?:_code| code|code)?[\"':= ]+(-?\d+)", json.dumps(response or {}), re.I)
+    return int(m[1]) if m else None
 
 
 def _dump(path: Path, records: list[dict]) -> None:

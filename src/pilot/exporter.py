@@ -199,7 +199,13 @@ def _request_of(call: dict, requests: dict[str, dict]) -> dict:
     Logs from before that record keep only the messages and tools, in LiteLLM's
     own logging object."""
     if call.get("upstream_request"):
-        return call["upstream_request"]
+        body = call["upstream_request"]
+        if isinstance(body, str):  # OpenAI-route calls log the upstream body as JSON text
+            try:
+                body = json.loads(body)
+            except ValueError:
+                return {}
+        return body
     if call.get("litellm_call_id") in requests:
         return requests[call["litellm_call_id"]]
     slo = call.get("standard_logging_object") or {}
@@ -280,6 +286,9 @@ def _reassemble(stream: dict | None, call: dict) -> dict:
     LiteLLM's reassembled response drops thinking and stop details, so the
     stream is the source. Events are byte chunks, not lines: join them first.
     """
+    if any(isinstance(e, dict) and e.get("object") == "chat.completion.chunk"
+           for e in (stream or {}).get("events") or []):
+        return _from_chunks(stream["events"])
     msg = {"content": [], "stop_reason": None, "stop_details": None, "usage": {}, "model": None}
     blocks: dict[int, dict] = {}
     partial_json: dict[int, str] = {}
@@ -324,6 +333,56 @@ def _reassemble(stream: dict | None, call: dict) -> dict:
     if not stream:  # non-streamed call: fall back to LiteLLM's response
         msg.update(_from_litellm_response(call))
     return msg
+
+
+FINISH_TO_STOP = {"tool_calls": "tool_use", "stop": "end_turn", "length": "max_tokens",
+                  "content_filter": "refusal", "function_call": "tool_use"}
+
+
+def _from_chunks(events: list) -> dict:
+    """An OpenAI-format stream (`chat.completion.chunk` dicts, as LiteLLM streams
+    `/chat/completions`) rebuilt as Anthropic content blocks: thinking from
+    `reasoning_content`, text, and tool calls assembled by index. Usage and
+    OpenRouter's cost come from the last chunk that carries them."""
+    thinking, text, tools, finish, usage, model = [], [], {}, None, {}, None
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        model = model or e.get("model")
+        if e.get("usage"):
+            usage = e["usage"]
+        for ch in e.get("choices") or []:
+            finish = ch.get("finish_reason") or finish
+            d = ch.get("delta") or {}
+            if d.get("reasoning_content"):
+                thinking.append(d["reasoning_content"])
+            if d.get("content"):
+                text.append(d["content"])
+            for tc in d.get("tool_calls") or []:
+                t = tools.setdefault(tc.get("index", 0), {"id": None, "name": None, "args": ""})
+                fn = tc.get("function") or {}
+                t["id"] = tc.get("id") or t["id"]
+                t["name"] = fn.get("name") or t["name"]
+                t["args"] += fn.get("arguments") or ""
+    content = []
+    if thinking:
+        content.append({"type": "thinking", "thinking": "".join(thinking)})
+    if text:
+        content.append({"type": "text", "text": "".join(text)})
+    for i in sorted(tools):
+        t = tools[i]
+        try:
+            args = json.loads(t["args"]) if t["args"] else {}
+        except ValueError:
+            args = {"_unparsed": t["args"]}
+        content.append({"type": "tool_use", "id": t["id"], "name": t["name"], "input": args})
+    details = usage.get("prompt_tokens_details") or {}
+    return {"content": content, "model": model, "stop_details": None,
+            "stop_reason": FINISH_TO_STOP.get(finish, finish),
+            "usage": {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens"),
+                      "cache_read_input_tokens": usage.get("cache_read_input_tokens", details.get("cached_tokens")),
+                      "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+                      "cost": usage.get("cost")}}
 
 
 def _from_litellm_response(call: dict) -> dict:

@@ -25,6 +25,15 @@ def stream_stops(records: list[dict]) -> list[dict]:
     for r in records:
         if r.get("record") != "stream":
             continue
+        chunks = [e for e in r.get("events") or [] if isinstance(e, dict) and e.get("object") == "chat.completion.chunk"]
+        if chunks:  # OpenAI-format stream: finish_reason and the last usage carry stop and cost
+            finish = next((c["finish_reason"] for e in chunks for c in e.get("choices") or []
+                           if c.get("finish_reason")), None)
+            usage = next((e["usage"] for e in reversed(chunks) if e.get("usage")), {})
+            stops.append({"litellm_call_id": r.get("litellm_call_id"),
+                          "stop_reason": "refusal" if finish == "content_filter" else finish,
+                          "stop_details": None, "cost": usage.get("cost")})
+            continue
         for event in r.get("events") or []:
             for line in str(event).split("\n"):
                 if not line.startswith("data:"):

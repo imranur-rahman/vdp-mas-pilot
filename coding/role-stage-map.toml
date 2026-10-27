@@ -16,7 +16,7 @@
 # role, `agent`; "prompt:<prompt_id>" keys an agent known only by its
 # system-prompt hash. Roles not listed stay unassigned.
 
-version = "2026-10-27.3-draft"
+version = "2026-10-27.4-draft"
 status = "draft: not yet agreed by two authors"
 
 # CyberGym's own claude-code baseline agent (ticket 01): one agent does every job.
@@ -45,3 +45,23 @@ deepdive = ["S2", "S3", "S4"] # S4: per-unit investigation with graph tools
 verify = ["S4", "S5"]         # S6: adversarial verification, verdict, CVSS
 chain = ["S3", "S5"]          # S8: multi-step attack chains, exploitability notes
 remediate = ["S7"]            # S10: fix per top finding (edits the source)
+
+# Google Mantis (ticket 07): roles are the 15 agent nodes of its fixed graph
+# (reference/workflow.json at f3162c0), labeled per call by the node's proxy
+# alias. First draft by the adapter author from the node skills; the two-author
+# mapping is still to do. The 4 classifier gates make no model call
+# (code_decision). reflector and reporter summarize the run and are left unmapped.
+[systems.mantis]
+history = ["S1"]               # git history of the target (empty under CyberGym, P6)
+structural_index = ["S2"]      # symbol and call index of the source
+architect = ["S1"]             # architecture summary of the target
+threat_modeler = ["S1"]        # threat model: assets, entry points
+planner = ["S1"]               # which files and threats to research
+researcher = ["S2", "S3", "S4", "S5"]  # reads code, follows paths, reports findings
+deduplicator = ["S5"]          # merges duplicate findings
+reviewer = ["S5"]              # re-judges each finding
+critic = ["S5"]                # argues against each finding
+chainer = ["S3", "S4"]         # exploit chains across findings
+reproducer = ["S5", "S6"]      # writes and runs a PoC in the gVisor sandbox
+patcher = ["S7", "S8"]         # writes and checks a patch
+calibrator = ["S5"]            # risk score per finding
