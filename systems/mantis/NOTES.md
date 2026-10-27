@@ -47,9 +47,32 @@ Pinned at `f3162c0`. The fixed graph (`workflow.base.json`, committed here) is
   config, so P3 changes (a)/(b) are external. `workflow.base.json` is the
   pinned graph of record.
 
-### Open against a real run (acceptance)
+### Facts from the development runs (Claude Haiku 5.5, 2026-10-27)
 
-The ADK `SqliteSessionService` events schema (`_read_sessions`), the exact
-`campaign_artifacts` PoC column, and whether the reproducer can build+run the
-OSS-Fuzz target inside the gVisor timeout are confirmed by the dev run, then
-the data run. The seam-2 transforms are TDD'd and do not wait on the run.
+- Dev 1-3 fixed setup only: Debian's `docker.io` client is below Docker 29's
+  minimum API (Mantis's gVisor check `docker info` failed) -> Docker 29 CLI in
+  the image; the graph `default_model` was still Vertex; node output was cut
+  at 4096 tokens (`LLM_MAX_TOKENS`). Dev 3 ran 40 calls ($0.68) before failing.
+- Dev 4 (`20261027T131520`): exit 0, 85 calls over 14 nodes, $1.52
+  (OpenRouter), 21 min, isolation `valid`. One gVisor sandbox on the task
+  image with network `none`; 24 sandbox executions; 3 findings in
+  `src/md4c-html.c` (URL schemes, raw HTML, numeric entity wraparound), none at
+  the known bug (`md_is_container_mark`, `src/md4c.c`). Summarized thinking
+  arrives on the OpenAI route (`reasoning_content`).
+- ADK 2.11 session events are JSON in `events.event_data`; node and visit come
+  from `node_info.path`, gate routes from `actions.route`, hand-offs from
+  `actions.end_of_agent`, sandbox runs from `run_sandbox*` function calls.
+
+### Known gaps (threats to validity)
+
+- **No CyberGym PoC from Mantis.** Its reproducer writes driver scripts that
+  rebuild the target with a sentinel observer, not inputs for the task's fuzz
+  target, so they are kept per finding (`repro_script`) and not submitted.
+  CyberGym's e2e mode runs stages 3-4 only after a passing PoC, so Mantis
+  findings are checked by `location_overlap` unless it records a patch.
+- **Patches only when recorded.** In dev 4 the patcher called `apply_patch`
+  but recorded no `patch_diff`; attempts are visible as tool calls only.
+- **No prompt caching** (0% cache reads): Mantis marks cache breakpoints only
+  for models it recognizes as Claude, and the node alias is not one.
+- State at hand-offs is captured by polling the session store every 3 s; a
+  node shorter than that shares its capture with the next hand-off.

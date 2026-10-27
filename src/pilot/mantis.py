@@ -92,6 +92,21 @@ def _description(row: dict) -> str | None:
     return text or None
 
 
+def _code_path_function(code_paths: str | None, filepath: str | None) -> str | None:
+    """The first function `code_paths` names in the finding's own file
+    (entries look like "src/md4c-html.c: render_entity (numeric branch)")."""
+    try:
+        paths = json.loads(code_paths or "[]")
+    except ValueError:
+        return None
+    for entry in paths if isinstance(paths, list) else []:
+        file, _, rest = str(entry).partition(":")
+        m = re.match(r"\s*([A-Za-z_]\w*)", rest)
+        if m and (not filepath or file.strip() == filepath):
+            return m[1]
+    return None
+
+
 def findings_from_db(db_path: Path) -> list[dict]:
     """Normalized findings read from Mantis's SQLite knowledge store.
 
@@ -106,10 +121,11 @@ def findings_from_db(db_path: Path) -> list[dict]:
     findings = []
     for row in rows:
         start, end = _line_bounds(row.get("line_numbers"))
+        function = _code_path_function(row.get("code_paths"), row.get("filepath"))
         findings.append({
             "finding_id": f"f{row['id']:03d}",
             "system": SYSTEM,
-            "location": {"file": row.get("filepath"), "function": None,
+            "location": {"file": row.get("filepath"), "function": function,
                          "line_start": start, "line_end": end},
             "description": _description(row),
             "cwe": row.get("cwe"),
@@ -123,7 +139,7 @@ def findings_from_db(db_path: Path) -> list[dict]:
 
 def write_findings(run_dir: Path, db_path: Path | None = None,
                    cybergym_summary: str | None = None, pocs: dict | None = None,
-                   source_root: Path | None = None) -> Path:
+                   source_root: Path | None = None, repro: dict | None = None) -> Path:
     """Write `<run folder>/findings.json` from the knowledge store.
 
     `cybergym_summary` is the run-relative path to the CyberGym `summary.json`
@@ -145,13 +161,16 @@ def write_findings(run_dir: Path, db_path: Path | None = None,
             (run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
             (run_dir / rel).write_text(_patch_text(db_path, f["finding_id"]))
             patch_ref = rel
-        _name_function(f["location"], source_root)
+        if not f["location"]["function"]:
+            _name_function(f["location"], source_root)
         poc = pocs.get(f.get("signature")) or pocs.get(f.get("lineage_id")) or {}
         record = {
             "finding_id": fid, "system": f["system"], "location": f["location"],
             "description": f["description"], "cwe": f.get("cwe"),
             "poc": poc.get("poc"), "patch": patch_ref,
             "stack_trace": poc.get("stack_trace"),
+            # the reproducer's driver script (Mantis PoCs are scripts, not target input)
+            "repro_script": (repro or {}).get(int(fid[1:])),
             "cybergym": ({"summary": cybergym_summary, "attempt": poc.get("attempt", 1)}
                          if cybergym_summary and poc.get("submitted") else None),
         }
@@ -295,56 +314,60 @@ def _base_workflow() -> dict:
 # --- output adapter + collector derivation ------------------------------------
 
 def collect_outputs(run_dir: Path, work: Path, task: str, repo: str, build_image: str) -> dict:
-    """Write the PoC/patch CyberGym validates, run its four stages, normalize
-    findings, and derive the Layer-2 collector files from Mantis's stores."""
-    from . import infra
+    """Output adapter: normalize findings, write what CyberGym can validate,
+    run its four stages, and derive the collector files.
 
+    Mantis's reproducer writes driver scripts (`workspace/repro_<id>.<ext>`)
+    that rebuild the target with an observer, not inputs for the task's fuzz
+    target, so they are kept with their finding (`repro_script`) and never
+    submitted as `poc.bin`. A patch Mantis recorded (`patch_diff`) is
+    submitted; CyberGym's e2e mode runs stages 3-4 only after a passing PoC,
+    so without target input its stages are recorded as CyberGym reports them."""
     db = work / "output" / "knowledge.sqlite"
     if not db.is_file():
         return {"adapter": "no knowledge store produced", "mantis_findings": 0}
     derive_collector(run_dir, work / "output" / "sessions.sqlite", db)
     shutil.copyfile(db, run_dir / KNOWLEDGE_DB)
 
+    repro = _repro_scripts(db, run_dir)
     findings = findings_from_db(db)
     patched = next((f for f in findings if _has_patch(db, f["finding_id"])), None)
-    poc_src = _first_repro_poc(db)
-    summary_ref = None
-    pocs = {}
-    if patched or poc_src:
-        out = run_dir / "cybergym" / task.replace("/", "_") / "output"
+    summary_ref, pocs, cybergym = None, {}, None
+    if patched:
+        out = run_dir / "cybergym" / task.replace("/", "_") / "mantis" / "output"
         out.mkdir(parents=True, exist_ok=True)
-        if patched:
-            (out / "fix.patch").write_text(_patch_text(db, patched["finding_id"]))
-        if poc_src:
-            (out / "poc.bin").write_bytes(poc_src)
+        (out / "fix.patch").write_text(_patch_text(db, patched["finding_id"]))
         summary_ref = _validate(run_dir, out, task, build_image)
-        if summary_ref and patched:
-            sig = patched.get("signature") or patched.get("lineage_id")
-            pocs[sig] = {"submitted": True, "attempt": 1,
-                         "poc": str((out / "poc.bin").relative_to(run_dir)) if poc_src else None}
+        pocs[patched.get("signature") or patched.get("lineage_id")] = {"submitted": True, "attempt": 1}
+        cybergym = "run on Mantis's recorded patch (no target-input PoC)"
+    else:
+        cybergym = ("not run: Mantis recorded no patch, and its PoCs are driver scripts, "
+                    "not input for the task's fuzz target")
+    write_findings(run_dir, db, cybergym_summary=summary_ref, pocs=pocs,
+                   source_root=work / "src", repro=repro)
+    return {"mantis_findings": len(findings), "mantis_repro_scripts": len(repro),
+            "cybergym_validation": cybergym}
 
-    write_findings(run_dir, db, cybergym_summary=summary_ref, pocs=pocs, source_root=work / "src")
-    return {"mantis_findings": len(findings), "validated": bool(summary_ref)}
+
+def _repro_scripts(db: Path, run_dir: Path) -> dict[int, str]:
+    """The reproducer's driver scripts, by finding id, copied into the run folder."""
+    out = {}
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute("SELECT filepath, content FROM campaign_artifacts "
+                            "WHERE filepath LIKE 'workspace/repro_%' ORDER BY id").fetchall()
+    for filepath, content in rows:
+        m = re.fullmatch(r"workspace/repro_(\d+)\.(\w+)", filepath or "")
+        if not m or content is None:
+            continue
+        rel = f"mantis/repro/repro_{m[1]}.{m[2]}"
+        (run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (run_dir / rel).write_bytes(content if isinstance(content, bytes) else str(content).encode())
+        out[int(m[1])] = rel
+    return out
 
 
 def _has_patch(db: Path, finding_id: str) -> bool:
     return bool(_patch_text(db, finding_id).strip())
-
-
-def _first_repro_poc(db: Path) -> bytes | None:
-    """The reproducer stores PoC bytes as a campaign artifact (workspace/repro_*)."""
-    try:
-        with sqlite3.connect(db) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT content FROM campaign_artifacts WHERE filepath LIKE 'workspace/repro_%' "
-                "ORDER BY id DESC LIMIT 1").fetchone()
-    except sqlite3.Error:
-        return None
-    if not row or row["content"] is None:
-        return None
-    data = row["content"]
-    return data if isinstance(data, bytes) else str(data).encode()
 
 
 def _validate(run_dir: Path, out: Path, task: str, build_image: str) -> str | None:
@@ -359,8 +382,9 @@ def _validate(run_dir: Path, out: Path, task: str, build_image: str) -> str | No
         infra.REPO / "data" / "projects" / task, infra.CYBERGYM / "projects" / task,
         build_image, "e2e")
     summary = {"attempts": [{"attempt": 1, **results}]}
-    (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    return str((out / "summary.json").relative_to(run_dir))
+    path = out.parent / "summary.json"  # cybergym/<task>/<run>/summary.json, output/ beside it
+    path.write_text(json.dumps(summary, indent=2))
+    return str(path.relative_to(run_dir))
 
 
 def handoff_records(gates: list[dict], handoffs: list[dict]) -> list[dict]:

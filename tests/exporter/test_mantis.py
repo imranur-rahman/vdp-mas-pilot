@@ -45,7 +45,8 @@ CREATE TABLE findings (
     patch_status TEXT,
     rca_summary TEXT,
     signature TEXT,
-    lineage_id TEXT
+    lineage_id TEXT,
+    code_paths TEXT NOT NULL DEFAULT '[]'
 )
 """
 
@@ -322,3 +323,24 @@ def test_an_openai_format_streamed_call_becomes_a_full_llm_step(tmp_path):
     assert s["cost_usd"] == 0.0012 and s["stop_reason"] == "tool_use"
     assert s["input_delta"][0]["content"][0]["text"] == "reproduce f001"
     assert run_outcome(run_dir)["cost_usd_openrouter"] == 0.0012
+
+
+def test_a_finding_with_only_code_paths_names_its_function_and_keeps_its_repro_script(tmp_path):
+    """Mantis often records no lines, only `code_paths` ("file: function ..."),
+    and its reproducer writes a driver script, not target input: the script is
+    kept with the finding, never submitted to CyberGym as a PoC."""
+    run_dir = run_folder(tmp_path)
+    db = mantis_db(run_dir / "knowledge.sqlite", [{
+        "filepath": "src/md4c-html.c", "title": "Dangerous URL schemes", "description": "javascript: in href",
+        "code_paths": json.dumps(["src/md4c-html.c: render_url_escaped", "src/md4c-html.c: render_attribute"])}])
+    (run_dir / "mantis/repro").mkdir(parents=True)
+    (run_dir / "mantis/repro/repro_1.py").write_text("#!/usr/bin/env python3\nPAYLOAD = b'[x](javascript:1)'\n")
+
+    mantis.write_findings(run_dir, db, repro={1: "mantis/repro/repro_1.py"})
+    bundle = export(run_dir, tasks_dir=TASKS)
+    (f,) = bundle_findings(bundle)
+
+    assert f["location"]["function"] == "render_url_escaped"
+    assert f["poc"] is None
+    assert (bundle / f["repro_script"]).read_text().startswith("#!/usr/bin/env python3")
+    assert f["tp_target_check"] == {**f["tp_target_check"], "method": "location_overlap", "result": "fail"}
