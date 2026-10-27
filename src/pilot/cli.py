@@ -5,11 +5,11 @@ import argparse
 import json
 from pathlib import Path
 
-from . import claims, coding, exporter, infra, isolation, mantis, runner
+from . import claims, coding, deepsec_run, exporter, infra, isolation, mantis, runner
 
 
 RUNS = {"claude-code": runner.run_claude_code, "claude-code-runner": runner.run_claude_code_in_runner,
-        "mantis": mantis.run_mantis}
+        "deepsec": deepsec_run.run_deepsec, "mantis": mantis.run_mantis}
 
 
 def _run_vvah(*args):
@@ -35,7 +35,8 @@ def main():
     run = sub.add_parser("run", help="run one system on one task")
     run.add_argument("system", choices=sorted(RUNS),
                      help="claude-code: in the task container; claude-code-runner: in a runner container;"
-                          " visa-vvah: VVAH in the task container; mantis: Mantis in a runner container")
+                          " visa-vvah: VVAH in the task container; deepsec: in the task container;"
+                          " mantis: Mantis in a runner container")
     run.add_argument("task", help="CyberGym-E2E task, e.g. md4c/arvo_31332")
     run.add_argument("--kind", choices=["dev", "data"], required=True)
     run.add_argument("--budget", type=float, help="hard cap in USD (default: dev 2, data 20)")

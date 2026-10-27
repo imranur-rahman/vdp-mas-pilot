@@ -118,7 +118,8 @@ def findings_from_db(db_path: Path) -> list[dict]:
 
 
 def write_findings(run_dir: Path, db_path: Path | None = None,
-                   cybergym_summary: str | None = None, pocs: dict | None = None) -> Path:
+                   cybergym_summary: str | None = None, pocs: dict | None = None,
+                   source_root: Path | None = None) -> Path:
     """Write `<run folder>/findings.json` from the knowledge store.
 
     `cybergym_summary` is the run-relative path to the CyberGym `summary.json`
@@ -140,6 +141,7 @@ def write_findings(run_dir: Path, db_path: Path | None = None,
             (run_dir / rel).parent.mkdir(parents=True, exist_ok=True)
             (run_dir / rel).write_text(_patch_text(db_path, f["finding_id"]))
             patch_ref = rel
+        _name_function(f["location"], source_root)
         poc = pocs.get(f.get("signature")) or pocs.get(f.get("lineage_id")) or {}
         record = {
             "finding_id": fid, "system": f["system"], "location": f["location"],
@@ -154,6 +156,17 @@ def write_findings(run_dir: Path, db_path: Path | None = None,
     path = run_dir / "findings.json"
     path.write_text(json.dumps({"findings": out}, indent=2))
     return path
+
+
+def _name_function(loc: dict, source_root: Path | None) -> None:
+    """Mantis reports file and lines; name the C function enclosing them (F-1)."""
+    if not source_root or not loc.get("file") or loc.get("line_start") is None:
+        return
+    from .findings import enclosing_function
+    for candidate in (Path(source_root) / loc["file"], *Path(source_root).glob(f"*/{loc['file']}")):
+        if candidate.is_file():
+            loc["function"] = enclosing_function(candidate.read_text(errors="replace"), loc["line_start"])
+            return
 
 
 def _patch_text(db_path: Path, finding_id: str) -> str:
@@ -215,7 +228,7 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
         "run_id": run_id, "system": SYSTEM, "task": task, "kind": kind, "placement": "runner_container",
         "requested_model": runner.MODELS[kind], "budget_usd": budget, "timeout_s": timeout_s,
         "mantis_commit": PIN, "task_build_image": image_ref,
-        "pilot_commit": runner._git_rev(infra.REPO), "cybergym_commit": runner._git_rev(infra.CYBERGYM),
+        "pilot_commit": runner._git_rev(infra.CODE), "cybergym_commit": runner._git_rev(infra.CYBERGYM),
         "gateway_ip": gateway, "runner_image": IMAGE, "started_at": time.time(),
     }
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
@@ -237,7 +250,7 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
     with isolation.ContainerEventLog(run_dir) as events:
         if not runner._image_exists(IMAGE):
             isolation.build_image(ensure_source(), IMAGE, run_dir,
-                                  dockerfile=str(infra.REPO / "infra/runner/mantis/Dockerfile"))
+                                  dockerfile=str(infra.CODE / "infra/runner/mantis/Dockerfile"))
         events.mark(isolation.SYSTEM_STARTED)
         container = isolation.start_runner_container(
             run_id=run_id, system=SYSTEM, image=IMAGE, command=cmd, gateway_ip=gateway, env=env,
@@ -268,7 +281,7 @@ def run_mantis(task: str, kind: str, budget_usd: float | None, timeout_s: int):
 def _base_workflow() -> dict:
     """Mantis's fixed workflow graph (committed copy at PIN, systems/mantis)."""
     from . import infra
-    return json.loads((infra.REPO / "systems/mantis/workflow.base.json").read_text())
+    return json.loads((infra.SYSTEMS / "mantis" / "workflow.base.json").read_text())
 
 
 # --- output adapter + collector derivation ------------------------------------
@@ -301,7 +314,7 @@ def collect_outputs(run_dir: Path, work: Path, task: str, repo: str, build_image
             pocs[sig] = {"submitted": True, "attempt": 1,
                          "poc": str((out / "poc.bin").relative_to(run_dir)) if poc_src else None}
 
-    write_findings(run_dir, db, cybergym_summary=summary_ref, pocs=pocs)
+    write_findings(run_dir, db, cybergym_summary=summary_ref, pocs=pocs, source_root=work / "src")
     derive_collector(run_dir, work / "output" / "sessions.sqlite", db)
     return {"mantis_findings": len(findings), "validated": bool(summary_ref)}
 
@@ -334,8 +347,8 @@ def _validate(run_dir: Path, out: Path, task: str, build_image: str) -> str | No
 
     poc, patch = out / "poc.bin", out / "fix.patch"
     results = run_final_validation(
-        str(poc) if poc.is_file() else None, str(patch) if patch.is_file() else None,
-        str(infra.REPO / "data" / "projects" / task), str(infra.CYBERGYM / "projects" / task.split("/")[0]),
+        poc if poc.is_file() else None, patch if patch.is_file() else None,
+        infra.REPO / "data" / "projects" / task, infra.CYBERGYM / "projects" / task,
         build_image, "e2e")
     summary = {"attempts": [{"attempt": 1, **results}]}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))

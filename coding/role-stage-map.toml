@@ -16,7 +16,7 @@
 # role, `agent`; "prompt:<prompt_id>" keys an agent known only by its
 # system-prompt hash. Roles not listed stay unassigned.
 
-version = "2026-10-27.2-draft"
+version = "2026-10-27.3-draft"
 status = "draft: not yet agreed by two authors"
 
 # CyberGym's own claude-code baseline agent (ticket 01): one agent does every job.
@@ -25,6 +25,14 @@ agent = ["S2", "S3", "S4", "S5", "S6", "S7", "S8"]
 
 # Adapter tickets add one table per system (vvah, deepsec, mantis,
 # anthropic-harness, openant, autocve) once the authors have mapped its roles.
+
+# deepsec (ticket 06): one role per command (systems/deepsec/NOTES.md). Draft
+# from the adapter's reading of deepsec's prompts; not yet mapped by two authors.
+[systems.deepsec]
+threat-model = ["S1"]                    # repository analysis: INFO.md, surface inventory
+matcher-generator = ["S1", "S2"]         # coverage gate and matcher repair: which sites get reviewed
+investigator = ["S2", "S3", "S4", "S5"]  # reads candidates, reasons about paths, reports findings
+revalidator = ["S5"]                     # re-judges each finding
 
 # Visa VVAH (ticket 05): roles are VVAH's model roles (`models.<role>` in its
 # default profile), labeled by stage window. First draft by the adapter author,
