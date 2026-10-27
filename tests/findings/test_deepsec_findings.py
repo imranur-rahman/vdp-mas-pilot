@@ -2,7 +2,7 @@
 schema in deepsec docs/data-layout.md) become normalized findings, and the
 run's C coverage decides `out_of_scope` (D8)."""
 
-from pilot.deepsec import code_decisions, normalize_findings, scope_evidence
+from pilot.deepsec import code_decisions, decide_outcome, normalize_findings, scope_evidence
 
 RECORD = {
     "filePath": "src/md4c.c",
@@ -27,15 +27,25 @@ PY_RECORD = {"filePath": "scripts/build_folding_map.py", "projectId": "md4c", "c
              "analysisHistory": [{"runId": "20261027-aaaa", "findingCount": 0}]}
 
 
+SOURCE = "\n" * 5640 + "static int\nmd_is_container_mark(MD_CTX* ctx, OFF beg)\n{\n" + "    x;\n" * 50 + "}\n"
+
+
 def test_each_reported_finding_becomes_one_normalized_finding():
     [f] = normalize_findings([RECORD, PY_RECORD])
     assert f["finding_id"] == "deepsec:finding_ab12"
     assert f["system"] == "deepsec"
-    assert f["location"] == {"file": "src/md4c.c", "function": None,
-                             "line_start": 5688, "line_end": 5690, "lines": [5688, 5690]}
+    assert f["location"] == {"file": "src/md4c.c", "function": None, "line_start": 5688, "line_end": 5690}
+    assert f["lines"] == [5688, 5690]
     assert f["title"] == "Out-of-bounds read in md_is_container_mark"
-    assert f["description"] == "CH(off) is read when off == ctx->size."
+    assert f["description"] == ("Out-of-bounds read in md_is_container_mark\n\n"
+                                "CH(off) is read when off == ctx->size.")
     assert f["poc"] is None and f["patch"] is None
+    assert f["stack_trace"] is None and f["cybergym"] is None
+
+
+def test_the_function_is_the_one_enclosing_the_reported_lines():
+    [f] = normalize_findings([RECORD], source_of={"src/md4c.c": SOURCE}.get)
+    assert f["location"]["function"] == "md_is_container_mark"
 
 
 def test_the_systems_own_judgement_is_kept_but_is_not_a_verdict():
@@ -104,3 +114,31 @@ def test_setup_gates_become_code_decisions_in_time_order():
 
 def test_no_setup_state_means_no_code_decisions():
     assert code_decisions(None) == []
+
+
+OUT = {"out_of_scope": True}
+IN = {"out_of_scope": False}
+ALL_OK = [{"role": r, "exit_code": 0} for r in ("threat-model", "matcher-generator", "investigator", "revalidator")]
+
+
+def test_out_of_scope_when_deepsec_finished_without_touching_c():
+    assert decide_outcome("completed", ALL_OK, OUT, error=None) == "out_of_scope"
+    assert decide_outcome("completed", ALL_OK, IN, error=None) == "completed"
+
+
+def test_out_of_scope_when_setups_coverage_gate_stops_the_run():
+    cmds = ALL_OK[:1] + [{"role": "matcher-generator", "exit_code": 1,
+                          "setup_stop": {"code": "NO_SCAN_CANDIDATES", "message": "paused"}}]
+    assert decide_outcome("completed", cmds, OUT, error=None) == "out_of_scope"
+
+
+def test_a_run_broken_by_setup_problems_is_not_out_of_scope():
+    cmds = [{"role": "threat-model", "exit_code": 2,
+             "setup_stop": {"code": "VERCEL_AUTH_REQUIRED", "message": "login"}}]
+    assert decide_outcome("completed", cmds, OUT, error=None) == "adapter_error"
+    assert decide_outcome("completed", [], OUT, error="RuntimeError('install')") == "adapter_error"
+
+
+def test_budget_and_refusal_outcomes_win():
+    assert decide_outcome("budget_exhausted", ALL_OK[:2], OUT, error=None) == "budget_exhausted"
+    assert decide_outcome("refused", ALL_OK[:1], OUT, error=None) == "refused"

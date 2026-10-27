@@ -3,6 +3,8 @@ hand-offs become `handoff` steps in time order with a `state_ref`, the
 captured state travels with the bundle, and findings are joined."""
 
 import json
+import shutil
+from pathlib import Path
 
 from pilot.exporter import export
 from pilot.state import capture
@@ -20,12 +22,12 @@ def call(n, role, start, end, text):
 
 
 FINDING = {"finding_id": "deepsec:finding_ab12", "system": "deepsec",
-           "location": {"file": "src/md4c.c", "function": None, "line_start": 5688, "line_end": 5690,
-                        "lines": [5688, 5690]},
-           "title": "OOB read in md_is_container_mark", "description": "CH(off) past end.",
-           "poc": None, "patch": None, "native": {"severity": "HIGH"},
-           "tp_target_check": {"method": "report_location_overlap", "file": True, "function": True,
-                               "lines": True, "matched_function": "md_is_container_mark", "tp_target": True}}
+           "location": {"file": "src/md4c.c", "function": "md_is_container_mark",
+                        "line_start": 5650, "line_end": 5650},
+           "description": "OOB read\n\nCH(off) past end.", "poc": None, "patch": None,
+           "stack_trace": None, "cybergym": None,
+           "title": "OOB read", "lines": [5650], "native": {"severity": "HIGH"}}
+PATCH = Path(__file__).resolve().parents[1] / "findings" / "md4c_arvo_31332.patch.diff"
 
 
 def make_run(tmp_path):
@@ -44,7 +46,9 @@ def make_run(tmp_path):
             from_role="threat-model", to_role="investigator", ts=t0 + 5)
     capture(run, "end", {"data/md4c/INFO.md": b"# md4c\n", "data/md4c/files/src/md4c.c.json": b"{}\n"},
             from_role="investigator", to_role=None, ts=t0 + 20)
-    (run / "findings.json").write_text(json.dumps([FINDING]))
+    (run / "findings.json").write_text(json.dumps({"findings": [FINDING]}))
+    (run / "ground_truth").mkdir()
+    shutil.copyfile(PATCH, run / "ground_truth" / "patch.diff")
     return run
 
 
@@ -70,12 +74,14 @@ def test_captured_state_travels_with_the_bundle(tmp_path):
     assert (bundle / "state" / "manifest.json").exists()
 
 
-def test_normalized_findings_are_joined_and_rendered(tmp_path):
+def test_deepsec_finding_in_the_patched_function_gets_tp_target(tmp_path):
     bundle = export(make_run(tmp_path))
-    assert json.loads((bundle / "findings.json").read_text()) == [FINDING]
+    [f] = json.loads((bundle / "findings.json").read_text())["findings"]
+    assert f["finding_id"] == "deepsec:finding_ab12"
+    assert f["tp_target_check"]["method"] == "location_overlap"
+    assert f["verdict"] == "tp_target"
     md = (bundle / "trajectory.md").read_text()
-    assert "deepsec:finding_ab12" in md and "src/md4c.c" in md and "tp_target" in md
-    assert "handoff" in md and "after-threat-model" in md
+    assert "deepsec:finding_ab12" in md and "handoff" in md and "after-threat-model" in md
 
 
 def test_out_of_scope_evidence_is_rendered(tmp_path):

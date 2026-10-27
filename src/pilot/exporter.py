@@ -6,10 +6,14 @@ Never Phoenix. The bundle is written to `<run folder>/bundle/`:
 
 - `steps.jsonl`: one step record per line (docs/DECISIONS.md, Step record)
 - `run.json`: the run's metadata and outcome
-- `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once
-- `oracle/`: the PoC and patch each CyberGym validation checked
-- `state/`: state captured at hand-offs (`manifest.json` plus one diff per capture)
-- `findings.json`: the run's normalized findings, with their `tp_target` checks
+- `prompts/<prompt_id>.json`: each distinct system prompt and tool list, once;
+  `prompts/claim-extraction-*.json`: the prompt that extracted the claims
+- `oracle/`: the PoC and patch each CyberGym validation checked, and the task's
+  known patch (`oracle/ground_truth.patch`)
+- `state/`: state captured at hand-offs (`manifest.json` plus one diff per
+  capture), from the adapter's `state/` (pilot.state); its `decisions.jsonl`
+  becomes `code_decision` steps
+- `findings.json`: normalized findings with their `tp_target` checks (verdicts.py)
 - `trajectory.md`: the run rendered for a human reader
 """
 
@@ -20,10 +24,12 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import claims, stages, verdicts
+
 STEP_FIELDS = (
     "run_id", "task_id", "system", "iteration",
     "step_id", "seq", "parent_step_id", "step_type",
-    "agent_instance_id", "role", "stage",
+    "agent_instance_id", "role", "stage", "stage_options",
     "input_delta", "input_prefix_hash",
     "output", "thinking_summary", "tool_calls",
     "prompt_id", "skill", "claim",
@@ -52,8 +58,16 @@ def load_proxy_log(run_dir: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def export(run_dir: Path, out_dir: Path | None = None) -> Path:
-    """Build the trajectory bundle for one run folder and return its path."""
+def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stages.DEFAULT_MAP,
+           tasks_dir: Path = verdicts.DEFAULT_TASKS, extractor: claims.Extractor | None = None) -> Path:
+    """Build the trajectory bundle for one run folder and return its path.
+
+    `stage_map` is the versioned role-to-stage map joined onto the steps (T-5).
+    `tasks_dir` holds each task's `patch.diff` for the `tp_target` checks (F-1),
+    used when the run folder has no `ground_truth/patch.diff`.
+    Claims come from the run folder's extraction recording; `extractor` (a live
+    model call, see claims.py) answers only what the recording lacks (T-3).
+    """
     run_dir = Path(run_dir)
     bundle = Path(out_dir) if out_dir else run_dir / "bundle"
     if bundle.exists():
@@ -74,10 +88,12 @@ def export(run_dir: Path, out_dir: Path | None = None) -> Path:
         s["seq"] = seq
         s["step_id"] = f"s{seq:04d}"
     _link_parents(steps)
+    run = {**run, "stage_map": stages.join_stages(steps, stages.load_map(stage_map))}
+    run["claims"] = claims.extract(steps, run_dir, bundle, extractor)
 
     (bundle / "steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in steps))
     (bundle / "run.json").write_text(json.dumps(run, indent=2))
-    findings = _findings(run_dir, bundle)
+    findings = verdicts.build_findings(run_dir, run, bundle, tasks_dir)
     (bundle / "trajectory.md").write_text(render(run, steps, bundle, findings))
     return bundle
 
@@ -360,14 +376,6 @@ def _merge_by_time(llm: list[dict], handoffs: list[dict]) -> list[dict]:
     return out + pending
 
 
-def _findings(run_dir: Path, bundle: Path) -> list[dict] | None:
-    path = run_dir / "findings.json"
-    if not path.exists():
-        return None
-    shutil.copyfile(path, bundle / "findings.json")
-    return json.loads(path.read_text())
-
-
 # --- CyberGym validation ------------------------------------------------------
 
 def _oracle_steps(run_dir: Path, bundle: Path) -> tuple[list[int], list[dict]]:
@@ -425,8 +433,7 @@ STAGE_NAMES = {1: "agent's PoC crashes the unpatched build",
                4: "ground-truth PoC no longer crashes with the patch"}
 
 
-def render(run: dict, steps: list[dict], bundle: Path | None = None,
-           findings: list[dict] | None = None) -> str:
+def render(run: dict, steps: list[dict], bundle: Path | None = None, findings: list[dict] | None = None) -> str:
     """The run as Markdown, readable without tools. Long text is cut at
     MAX_BLOCK_CHARS; steps.jsonl keeps it whole."""
     outcome = run.get("outcome") or {}
@@ -445,25 +452,8 @@ def render(run: dict, steps: list[dict], bundle: Path | None = None,
     for s in steps:
         out += _render_step(s, issued_in, bundle, shown)
     if findings is not None:
-        out += _render_findings(findings)
+        out += verdicts.render_findings(findings)
     return "\n".join(out) + "\n"
-
-
-def _render_findings(findings: list[dict]) -> list[str]:
-    out = [f"## Findings ({len(findings)})", "",
-           "Verdicts other than the automatic `tp_target` check are left to coders (ADR 0004).", ""]
-    for f in findings:
-        loc = f.get("location") or {}
-        lines = f"lines {loc['line_start']}-{loc['line_end']}" if loc.get("line_start") else "no lines"
-        function = f", function `{loc['function']}`" if loc.get("function") else ""
-        check = f.get("tp_target_check") or {}
-        out += [f"### {f['finding_id']}: {f.get('title') or ''}", "",
-                f"- Location: `{loc.get('file')}`, {lines}{function}",
-                f"- tp_target check ({check.get('method')}): **{check.get('tp_target')}**"
-                f" (file {check.get('file')}, function {check.get('function')}, lines {check.get('lines')})",
-                f"- The system's own fields: `{json.dumps(f.get('native') or {})}`", "",
-                _fence(_cut(f.get("description") or "")), ""]
-    return out
 
 
 def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str]) -> list[str]:
@@ -502,6 +492,11 @@ def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str])
            f"_{_when(s['ts_start'])}, {s['latency_ms']} ms, model `{s['model']}`, "
            "tokens " + ", ".join(f"{k} {v}" for k, v in (s["tokens"] or {}).items())
            + f", cost ${s['cost_usd']}_", ""]
+    if s["stage"] or s["stage_options"]:
+        out += [f"Stage: {s['stage'] or 'coder chooses one of ' + ', '.join(s['stage_options'])}", ""]
+    if s["claim"]:
+        out += [f"**Claim (extracted by `{s['claim']['model']}`, {s['claim']['prompt']}):** "
+                f"{s['claim']['text'] or 'none'}", ""]
     if s["parent_step_id"]:
         out += [f"Input new since {s['parent_step_id']} (earlier input hash `{s['input_prefix_hash']}`):", ""]
     else:

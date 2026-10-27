@@ -6,7 +6,10 @@
 #   /opt/deepsec-src.tar.gz   `git archive` of deepsec at the pinned commit
 #   /opt/deepsec-patches/     our changes, applied in name order
 # Env: DEEPSEC_TARGET (the project root, e.g. /src/md4c), DEEPSEC_ID,
-#      DEEPSEC_MODEL, PILOT_BASE_URL (the LiteLLM proxy).
+#      DEEPSEC_MODEL.
+# Model auth is `local`: deepsec sets no credentials and needs no Vercel link
+# (direct auth requires one at this commit); the run sets ANTHROPIC_BASE_URL
+# and ANTHROPIC_API_KEY, which the Claude Agent SDK forwards to Claude Code.
 set -euo pipefail
 
 # Node 22 (D1) and deepsec's own package manager (pnpm 8.15.9, package.json).
@@ -37,8 +40,6 @@ cd "$DEEPSEC_TARGET"
 node /opt/deepsec/packages/deepsec/dist/cli.mjs init .deepsec . \
   --id "$DEEPSEC_ID" --through install --headless --no-tui --output jsonl \
   --package-manager pnpm \
-  --agent claude --model "$DEEPSEC_MODEL" \
-  --model-auth direct --ai-provider anthropic --ai-api-key-env PILOT_PROXY_KEY \
-  --ai-base-url "$PILOT_BASE_URL"
+  --agent claude --model "$DEEPSEC_MODEL" --model-auth local
 test -f .deepsec/node_modules/deepsec/dist/cli.mjs
 echo "deepsec installed"

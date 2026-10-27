@@ -29,7 +29,7 @@ import tarfile
 import time
 from pathlib import Path
 
-from . import deepsec, findings, infra, runner, state
+from . import deepsec, infra, runner, state
 
 UPSTREAM = "https://github.com/vercel-labs/deepsec"
 PINNED_COMMIT = "4fa67220aff67ac93dfc840206d3d32bfa4411ec"
@@ -117,7 +117,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
         "adapter": {"upstream": UPSTREAM, "commit": PINNED_COMMIT,
                     "patches": [str(p.relative_to(infra.CODE)) for p in patches],
                     "placement": "task container", "backend": "claude (Claude Agent SDK)",
-                    "model_auth": "direct, provider anthropic, base URL = proxy",
+                    "model_auth": "local (no Vercel link); the Claude Agent SDK reads ANTHROPIC_BASE_URL = proxy, ANTHROPIC_API_KEY = per-role key",
                     "roles": {role: " ".join(args) for role, args in ROLES}},
     }
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
@@ -142,7 +142,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
         code, out, err = cg.exec_run(
             cid, "bash /opt/deepsec-install.sh", "Installing deepsec", timeout=1800,
             env={"DEEPSEC_TARGET": target, "DEEPSEC_ID": config["repo_to_patch"],
-                 "DEEPSEC_MODEL": model, "PILOT_BASE_URL": base_url})
+                 "DEEPSEC_MODEL": model})
         (log_dir / "00-install.log").write_text(out + "\n--- stderr ---\n" + err)
         if code != 0:
             raise RuntimeError(f"deepsec install failed ({code}): {err[-800:]}")
@@ -168,7 +168,7 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
             started = time.time()
             code, out, err = cg.exec_run(
                 cid, f"{cli} {shlex.join(argv)}", f"deepsec {role}", timeout=remaining_time,
-                workdir=workspace, env={**fw.env_vars(), "PILOT_PROXY_KEY": key})
+                workdir=workspace, env={**fw.env_vars(), "ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_API_KEY": key})
             finished = time.time()
             (log_dir / f"{i:02d}-{role}.log").write_text(out + "\n--- stderr ---\n" + err)
             stop = _setup_stop(out) if code != 0 else None
@@ -190,15 +190,14 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
             cg.cleanup_container(cid)
 
     meta["commands"] = commands
-    _write_findings(run_dir, script_path / "patch.diff", data_path / "src.tgz", config["repo_to_patch"])
+    _write_findings(run_dir, data_path / "src.tgz", config["repo_to_patch"])
     outcome = runner._outcome(run_dir, minted, budget, error)
     _, setup_state = _records(run_dir, config["repo_to_patch"])
     (run_dir / "decisions.jsonl").write_text(
         "".join(json.dumps(d) + "\n" for d in deepsec.code_decisions(setup_state)))
     evidence = _scope(run_dir, config["repo_to_patch"])
     meta["scope_evidence"] = evidence
-    if outcome["outcome"] == "completed" and evidence["out_of_scope"] and not error:
-        outcome["outcome"] = "out_of_scope"
+    outcome["outcome"] = deepsec.decide_outcome(outcome["outcome"], commands, evidence, error)
     meta.update(finished_at=time.time(), error=error, outcome=outcome)
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2))
     return run_dir
@@ -232,10 +231,10 @@ def _scope(run_dir: Path, project_id: str) -> dict:
     return deepsec.scope_evidence(records, setup_state)
 
 
-def _write_findings(run_dir: Path, patch_diff: Path, src_tgz: Path, repo: str) -> None:
+def _write_findings(run_dir: Path, src_tgz: Path, repo: str) -> None:
+    """`findings.json` in verdicts.py's format; the exporter adds the checks.
+    Functions are named from the task's own source (src.tgz)."""
     records, _ = _records(run_dir, repo)
-    normalized = deepsec.normalize_findings(records)
-    hunks = findings.patch_hunks(patch_diff.read_text())
     with tarfile.open(src_tgz) as tar:
         def source_of(path: str) -> str | None:
             try:
@@ -243,6 +242,5 @@ def _write_findings(run_dir: Path, patch_diff: Path, src_tgz: Path, repo: str) -
             except KeyError:
                 return None
             return f.read().decode(errors="replace") if f else None
-        for f in normalized:
-            f["tp_target_check"] = findings.location_check(f, hunks, source_of)
-    (run_dir / "findings.json").write_text(json.dumps(normalized, indent=2))
+        normalized = deepsec.normalize_findings(records, source_of)
+    (run_dir / "findings.json").write_text(json.dumps({"findings": normalized}, indent=2))

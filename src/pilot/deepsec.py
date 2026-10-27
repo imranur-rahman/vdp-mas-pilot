@@ -7,35 +7,62 @@ setup's resumable state, including where it stopped and why, in
 """
 
 import hashlib
+from typing import Callable
+
+from .findings import enclosing_function
 
 C_EXTENSIONS = (".c", ".h", ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx")
+# Setup stops that are deepsec's own scope decision, not a broken run.
+SCOPE_STOPS = {"NO_SCAN_CANDIDATES", "SCAN_COVERAGE_INSUFFICIENT"}
 
 
-def normalize_findings(file_records: list[dict]) -> list[dict]:
-    """Every finding deepsec recorded, including ones its own revalidation
-    called false positives: those are exactly what the study codes."""
+def normalize_findings(file_records: list[dict],
+                       source_of: Callable[[str], str | None] | None = None) -> list[dict]:
+    """Every finding deepsec recorded, in verdicts.py's normalized format,
+    including ones its own revalidation called false positives: those are
+    exactly what the study codes. `source_of(path)` gives the task's source
+    so the enclosing function of the first reported line can be named."""
     out = []
     for record in sorted(file_records, key=lambda r: r.get("filePath") or ""):
         path = record.get("filePath")
+        source = source_of(path) if source_of and path and path.lower().endswith(C_EXTENSIONS) else None
         for f in record.get("findings") or []:
             lines = sorted({n for n in f.get("lineNumbers") or [] if isinstance(n, int)})
             fid = f.get("findingId") or "finding_" + hashlib.sha256(
                 f"{record.get('projectId')}\0{path}\0{f.get('title')}".encode()).hexdigest()[:16]
+            function = enclosing_function(source, lines[0]) if source and lines else None
             out.append({
                 "finding_id": f"deepsec:{fid}",
                 "system": "deepsec",
-                "location": {"file": path, "function": None,
+                "location": {"file": path, "function": function,
                              "line_start": lines[0] if lines else None,
-                             "line_end": lines[-1] if lines else None,
-                             "lines": lines},
-                "title": f.get("title"),
-                "description": f.get("description"),
+                             "line_end": lines[-1] if lines else None},
+                "description": "\n\n".join(x for x in (f.get("title"), f.get("description")) if x),
                 "poc": None,
                 "patch": None,
+                "stack_trace": None,
+                "cybergym": None,
+                "title": f.get("title"),
+                "lines": lines,
                 "native": {k: f.get(k) for k in ("severity", "vulnSlug", "confidence", "recommendation",
                                                   "producedByRunId", "triage", "revalidation")},
             })
     return out
+
+
+def decide_outcome(base: str, commands: list[dict], evidence: dict, error: str | None) -> str:
+    """The run outcome: budget and refusal outcomes (from the proxy log) win;
+    `out_of_scope` needs deepsec itself to have decided it (setup finished, or
+    stopped at its coverage gate) without reaching C; anything else that
+    stopped the commands is the adapter's problem, not the system's."""
+    if base in ("budget_exhausted", "refused"):
+        return base
+    stops = [c.get("setup_stop") or {} for c in commands if c.get("exit_code")]
+    if error or (stops and stops[-1].get("code") not in SCOPE_STOPS):
+        return "adapter_error"
+    if evidence.get("out_of_scope"):
+        return "out_of_scope"
+    return base
 
 
 def _iso(ts: str | None) -> float | None:

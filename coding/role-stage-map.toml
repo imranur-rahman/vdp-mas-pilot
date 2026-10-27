@@ -1,0 +1,35 @@
+# Role-to-stage map (T-5, docs/DECISIONS.md). Stages S1-S8 are the paper's
+# common VDP stages (failure-mode-paper, background.tex, tab:stages):
+#   S1 threat modeling and target selection   S5 verdict and PoC generation
+#   S2 source and sink extraction             S6 reproduction and oracle check
+#   S3 call-chain and path reasoning          S7 patch generation
+#   S4 path-condition and feasibility         S8 patch check
+#
+# Two authors each map every role from its prompts and code, then agree; the
+# agreed map gets a new version. Bump `version` on every change: each bundle
+# records the version and file hash that assigned its stages. Re-exporting a
+# run applies a new map; nothing is re-run.
+#
+# Format: [systems.<system>] then <role> = ["S<n>", ...]. One stage is assigned
+# to the role's steps automatically; more than one leaves the choice to the
+# coder (label file `stage`). A system without role labels has one unnamed
+# role, `agent`; "prompt:<prompt_id>" keys an agent known only by its
+# system-prompt hash. Roles not listed stay unassigned.
+
+version = "2026-10-27.2-draft"
+status = "draft: not yet agreed by two authors"
+
+# CyberGym's own claude-code baseline agent (ticket 01): one agent does every job.
+[systems.claude-code]
+agent = ["S2", "S3", "S4", "S5", "S6", "S7", "S8"]
+
+# Adapter tickets add one table per system (vvah, deepsec, mantis,
+# anthropic-harness, openant, autocve) once the authors have mapped its roles.
+
+# deepsec (ticket 06): one role per command (systems/deepsec/NOTES.md). Draft
+# from the adapter's reading of deepsec's prompts; not yet mapped by two authors.
+[systems.deepsec]
+threat-model = ["S1"]                    # repository analysis: INFO.md, surface inventory
+matcher-generator = ["S1", "S2"]         # coverage gate and matcher repair: which sites get reviewed
+investigator = ["S2", "S3", "S4", "S5"]  # reads candidates, reasons about paths, reports findings
+revalidator = ["S5"]                     # re-judges each finding

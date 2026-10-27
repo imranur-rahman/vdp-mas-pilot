@@ -274,3 +274,24 @@ Through OpenRouter, calls run under OpenRouter's Anthropic account, so a
 verification of the team's own organization applies only if OpenRouter uses
 the team's own Anthropic key (BYOK) or calls go to Anthropic directly.
 **Resolved 2026-10-27: the study uses Claude Haiku 5.5 for every system and role (ADR 0005).**
+
+## Claims, stages, verdicts, coding kit (ticket 11, 2026-10-27)
+
+- **Role-to-stage map (T-5):** `coding/role-stage-map.toml`, versioned TOML,
+  `[systems.<system>] <role> = ["S<n>", ...]` (`agent` for a system without
+  role labels, `prompt:<prompt_id>` for an agent known only by its prompt
+  hash). One stage is assigned on export; several leave `stage` empty with
+  `stage_options` for the coder. Each bundle's `run.json` records the map
+  version and file hash. The current map is a draft until two authors agree.
+- **Claims (T-3):** `pilot claims <run folder>` sends batches of model-call
+  steps to Claude Haiku 5.5 through the proxy's `tooling` route; requests and
+  raw responses are kept in `<run folder>/claims.jsonl` and replayed on every
+  export. The extraction's own proxy log is `<run folder>/claim-extraction/proxy.jsonl`.
+- **Findings (F-1):** output adapters write `<run folder>/findings.json`
+  (format in `src/pilot/verdicts.py`); CyberGym's own agents get one finding
+  per attempt. The bundle's `findings.json` carries each `tp_target_check`;
+  a passing check sets `verdict: tp_target`, all other verdicts are coders'.
+- **Label files:** `coding/labels/<run_id>/<coder>.yaml` (`pilot labels`),
+  keyed by step ID and finding ID: failure modes, first decisive error, stage
+  choice, claim correction, verdict. `pilot kappa a.yaml b.yaml` gives Cohen's
+  κ per verdict, per failure-mode code, for first decisive error, and for stage.
