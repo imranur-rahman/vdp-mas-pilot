@@ -48,7 +48,7 @@ Start: `pilot run deepsec md4c/arvo_31332 --kind dev|data`.
   `location_overlap` check matches reported file and function against `patch.diff`.
 - **Code decisions:** setup's gates from `setup-state.json` (baseline scan,
   coverage gate, each matcher-repair attempt, final scan, setup stop) go to
-  `decisions.jsonl` and become `code_decision` steps.
+  `handoffs.jsonl` (with the state captures, ticket 05's collector format) and become `code_decision` and `handoff` steps.
 - **D8:** the run is `out_of_scope` when deepsec investigated no C/C++ file;
   the evidence (`scope_evidence` in `run.json`) records scan candidates,
   language stats, matcher attempts, and where setup stopped. A run stopped for
@@ -59,6 +59,32 @@ Start: `pilot run deepsec md4c/arvo_31332 --kind dev|data`.
 
 None: deepsec runs unmodified. `install.sh` applies any `patches/*.patch` in
 name order if one is ever needed.
+
+## Runs (ticket 06, md4c/arvo_31332, Claude Haiku 5.5)
+
+| Run | Kind | Outcome | Isolation | Calls | Cost (OpenRouter) | Findings |
+|---|---|---|---|---|---|---|
+| `20261027T011001-…-dev` | dev | (adapter stopped at `VERCEL_AUTH_REQUIRED`, before the switch to local auth) | not logged | 0 | $0 | 0 |
+| `20261027T025229-…-dev` | dev | `budget_exhausted` ($2 cap; revalidator not run) | valid | 91 | $1.33 | 6 |
+| `20261027T081716-…-data` | data | `completed` | valid | 87 | $2.40 | 17 |
+
+**D8 answer: deepsec does analyze C.** Built-in matchers and the scanner's
+language list have no C, but setup's repository analysis inventoried md4c's
+surfaces (parse API, HTML renderer, md2html CLI). In both runs, matcher repair
+then generated declarative C matchers (`md4c-parse-api-primitives`,
+`md4c-html-render-primitives`, `md2html-cli-argv-entry`), coverage passed, and
+the investigator read 7 to 9 C files, `src/md4c.c` among them. In the data run
+deepsec reported 17 findings (11 in `src/md4c.c`) and its own revalidation
+called all 17 true positives. None is in `md_is_container_mark`, so every
+`tp_target` check fails; the 17 are for coders (`tp_other`, `fp`, `unverified`).
+
+Known capture gap: the proxy's system-prompt hash changes on every call from
+Claude Code 2.1.311 (the Agent SDK's bundled CLI), although the system text that
+reaches the upstream request is identical. The per-request part is most likely
+in the billing-header line, which LiteLLM strips. So each call is its own
+`agent_instance_id`, and steps carry their full input instead of a delta. Role
+labels come from the per-command keys and are not affected. Fix: hash the system
+prompt without the `x-anthropic-billing-header:` line (proxy, not done here).
 
 ## Source facts at the pinned commit (D8)
 

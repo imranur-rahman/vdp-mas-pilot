@@ -1,0 +1,38 @@
+[
+  {
+    "role": "preflight",
+    "stage": "preflight",
+    "start": 1793103329.393009,
+    "end": 1793103341.218963
+  },
+  {
+    "role": "autoexclude",
+    "stage": "auto-step1",
+    "start": 1793103341.3502614,
+    "end": 1793103342.9192224
+  },
+  {
+    "role": "threatmodel",
+    "stage": "s2",
+    "start": 1793103357.0332422,
+    "end": 1793103384.562571
+  },
+  {
+    "role": "deepdive",
+    "stage": "s4",
+    "start": 1793103384.8260937,
+    "end": 1793103429.271124
+  },
+  {
+    "role": "verify",
+    "stage": "s6",
+    "start": 1793103429.4245508,
+    "end": 1793103429.6638446
+  },
+  {
+    "role": "chain",
+    "stage": "s8",
+    "start": 1793103429.9055157,
+    "end": 1793103430.0854356
+  }
+]

@@ -169,12 +169,17 @@ def make_key(proxy):
     return _make
 
 
-def wait_for_log(path: Path, n: int = 1, timeout: float = 20) -> list[dict]:
-    """Logging hooks run after the response; poll until n records exist."""
+def wait_for_log(path: Path, n: int = 1, timeout: float = 20, with_requests: bool = False) -> list[dict]:
+    """Logging hooks run after the response; poll until n records exist.
+
+    `request` records (written for non-streamed calls before the call is
+    logged) are left out unless `with_requests`."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if path.exists():
             lines = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+            if not with_requests:
+                lines = [r for r in lines if r.get("record") != "request"]
             if len(lines) >= n:
                 return lines
         time.sleep(0.5)

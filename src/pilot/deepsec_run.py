@@ -202,8 +202,8 @@ def run_deepsec(task: str, kind: str, budget_usd: float | None, timeout_s: int) 
     shutil.copyfile(script_path / "patch.diff", run_dir / "ground_truth" / "patch.diff")
     outcome = runner._outcome(run_dir, minted, budget, error)
     _, setup_state = _records(run_dir, config["repo_to_patch"])
-    (run_dir / "decisions.jsonl").write_text(
-        "".join(json.dumps(d) + "\n" for d in deepsec.code_decisions(setup_state)))
+    records = deepsec.handoff_records(state.load_manifest(run_dir), deepsec.code_decisions(setup_state))
+    (run_dir / "handoffs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
     evidence = _scope(run_dir, config["repo_to_patch"])
     meta["scope_evidence"] = evidence
     outcome["outcome"] = deepsec.decide_outcome(outcome["outcome"], commands, evidence, error)

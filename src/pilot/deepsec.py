@@ -7,6 +7,7 @@ setup's resumable state, including where it stopped and why, in
 """
 
 import hashlib
+import json
 from typing import Callable
 
 from .findings import enclosing_function
@@ -97,6 +98,23 @@ def code_decisions(setup_state: dict | None) -> list[dict]:
     for d in out:
         d["role"] = "matcher-generator"
     return out
+
+
+def handoff_records(manifest: list[dict], decisions: list[dict]) -> list[dict]:
+    """`handoffs.jsonl` records (the collector format the exporter reads): one
+    `handoff` per state capture (pilot.state manifest) and one `code_decision`
+    per setup gate (`code_decisions`), in time order."""
+    recs = [{"t": e.get("ts"), "step_type": "handoff", "role": e.get("from_role"), "stage": None,
+             "summary": e.get("note"),
+             "state_ref": {k: e.get(k) for k in ("seq", "label", "diff", "from_role", "to_role",
+                                                  "files", "added", "changed", "removed")}}
+            for e in manifest]
+    for d in decisions:
+        out = d.get("output") if isinstance(d.get("output"), dict) else {"value": d.get("output")}
+        recs.append({"t": d.get("ts"), "step_type": "code_decision", "role": d.get("role"), "stage": None,
+                     "summary": f"{d.get('name')}: {json.dumps(out, sort_keys=True)[:2000]}",
+                     "state_ref": {"decision": d.get("name"), **out}})
+    return sorted(recs, key=lambda r: r["t"] or 0)
 
 
 def _is_c(path: str) -> bool:
