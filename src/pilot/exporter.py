@@ -80,6 +80,9 @@ def export(run_dir: Path, out_dir: Path | None = None, *, stage_map: Path = stag
     iteration = attempts[-1] if attempts else 1
     steps = [{**_empty_step(), **base, "iteration": iteration, **s} for s in llm]
     steps += [{**_empty_step(), **base, **s} for s in oracle]
+    # Adapter-emitted steps (hand-offs, a system's own oracle runs) captured in
+    # the run folder; appended last so existing steps keep their numbers.
+    steps += [{**_empty_step(), **base, **s} for s in _extra_steps(run_dir)]
     for seq, s in enumerate(steps, 1):
         s["seq"] = seq
         s["step_id"] = f"s{seq:04d}"
@@ -355,6 +358,17 @@ def _oracle_steps(run_dir: Path, bundle: Path) -> tuple[list[int], list[dict]]:
     return attempts, steps
 
 
+def _extra_steps(run_dir: Path) -> list[dict]:
+    """Step records an adapter wrote to `<run>/extra_steps.jsonl` (handoff,
+    code_decision, a system's own oracle_run). Each is a partial step dict; the
+    exporter fills the empty fields and numbers it. None present (the common
+    case) yields nothing, so fixtures without the file are unchanged."""
+    path = Path(run_dir) / "extra_steps.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
 def _copy_first(bundle: Path, dest: str, *candidates: Path) -> str | None:
     for src in candidates:
         if src.is_file():
@@ -395,6 +409,18 @@ def render(run: dict, steps: list[dict], bundle: Path | None = None, findings: l
 
 
 def _render_step(s: dict, issued_in: dict, bundle: Path | None, shown: set[str]) -> list[str]:
+    if s["step_type"] == "handoff":
+        return [f"## Step {s['seq']} · handoff · {s.get('role') or ''}", "",
+                f"Captured scan state after the `{s.get('role')}` phase.",
+                f"State: {_link(s.get('state_ref'))}", ""]
+    if s["step_type"] == "oracle_run" and (s.get("oracle_ref") or {}).get("source") != "cybergym":
+        ref = s["oracle_ref"] or {}
+        return [f"## Step {s['seq']} · oracle_run · {ref.get('source')}"
+                f" (finding {ref.get('finding_id')})", "",
+                f"Result: **{s['output']}**", "",
+                f"- Details: {ref.get('details') or 'none'}",
+                f"- Image built: {ref.get('built_image')}; evidence: "
+                f"{', '.join(ref.get('evidence_types') or []) or 'none'}", ""]
     if s["step_type"] == "oracle_run":
         ref = s["oracle_ref"] or {}
         out = [f"## Step {s['seq']} · oracle_run · CyberGym stage {ref.get('stage')}"
