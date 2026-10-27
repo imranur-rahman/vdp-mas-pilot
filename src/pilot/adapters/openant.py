@@ -123,61 +123,72 @@ def normalize_findings(pipeline_output: dict, system: str = SYSTEM,
     return out
 
 
-# --- dynamic tests as oracle_run steps --------------------------------------
+# --- dynamic tests as oracle_run records ------------------------------------
 
-def dynamic_oracle_steps(dynamic_results: dict | list | None) -> list[dict]:
-    """One `oracle_run` step per OpenAnt dynamic-test result.
+def dynamic_oracle_records(dynamic_results: dict | list | None, ts: float | None = None) -> list[dict]:
+    """`oracle_runs.jsonl` records (the collector format the exporter reads),
+    one per OpenAnt dynamic-test result; each becomes an `oracle_run` step.
 
-    OpenAnt's own oracle (a per-finding Docker exploit test) is recorded
-    distinctly from CyberGym's four-stage validation: `oracle_ref.source` is
-    `openant_dynamic_test`. A result with a generated Dockerfile means an image
-    was built (through the logged registry allowlist); an empty one — e.g. a C
-    finding with no Docker template — means `SKIPPED` with nothing built.
-    Accepts the whole `dynamic_test_results.json` object or a bare results list.
+    OpenAnt's own oracle (a per-finding Docker exploit test) is kept distinct
+    from CyberGym's four-stage validation: `source` is `openant_dynamic_test`.
+    A result with a generated Dockerfile means an image was built (through the
+    logged registry allowlist); an empty one, e.g. a C finding with no Docker
+    template, means `SKIPPED` with nothing built. Accepts the whole
+    `dynamic_test_results.json` object or a bare results list.
     """
     if not dynamic_results:
         return []
     results = dynamic_results if isinstance(dynamic_results, list) else dynamic_results.get("results") or []
-    steps = []
-    for r in results:
-        steps.append({
-            "step_type": "oracle_run",
-            "iteration": 1,
-            "output": r.get("status"),
-            "oracle_ref": {
-                "source": "openant_dynamic_test",
-                "finding_id": r.get("finding_id"),
-                "status": r.get("status"),
-                "details": r.get("details"),
-                "built_image": bool(r.get("dockerfile")),
-                "evidence_types": [e.get("type") for e in (r.get("evidence") or [])],
-                "retry_count": r.get("retry_count", 0),
-                "elapsed_seconds": r.get("elapsed_seconds"),
-            },
-        })
-    return steps
+    return [{
+        "ts": ts,
+        "role": "dynamic_test",
+        "kind": "openant_dynamic_test",
+        "source": "openant_dynamic_test",
+        "result": r.get("status"),
+        "poc_ref": None,
+        "patch_ref": None,
+        "note": f"finding {r.get('finding_id')}: {r.get('details') or ''}".strip(),
+        "detail": {
+            "finding_id": r.get("finding_id"),
+            "status": r.get("status"),
+            "built_image": bool(r.get("dockerfile")),
+            "evidence_types": [e.get("type") for e in (r.get("evidence") or [])],
+            "retry_count": r.get("retry_count", 0),
+            "elapsed_seconds": r.get("elapsed_seconds"),
+        },
+    } for r in results]
 
 
 # --- scan state at hand-offs ------------------------------------------------
 
-def handoff_steps(records: list[dict]) -> list[dict]:
-    """One `handoff` step per captured hand-off record (collector `handoffs.jsonl`).
+def capture_state(run_dir: Path, captures_dir: Path) -> list[dict]:
+    """`state/` (pilot.state format) and `handoffs.jsonl` from the collector's
+    captures: one hand-off per `<step>.report.json` OpenAnt wrote, plus the end.
 
-    The producing phase is the step's `role`; `state_ref` points at the scan
-    state captured at that hand-off (relative to the run folder). The exporter
-    fills the remaining step fields and numbers the steps.
+    Each capture's files are OpenAnt's scan directory at that point
+    (`scan/<path>`) and the target tree's changes (`files.diff`), so each
+    state diff shows what the finished phase produced. The phase that just
+    finished is the hand-off's `from_role`; the next capture's phase is its
+    `to_role`.
     """
-    steps = []
-    for r in records or []:
-        steps.append({
-            "step_type": "handoff",
-            "role": r.get("step"),
-            "output": r.get("step"),
-            "state_ref": r.get("state_ref"),
-            "ts_start": r.get("t"),
-            "ts_end": r.get("t"),
-        })
-    return steps
+    from .. import state
+    from ..deepsec import handoff_records
+    path = Path(captures_dir) / "handoffs.jsonl"
+    records = [json.loads(l) for l in path.read_text().splitlines() if l.strip()] if path.exists() else []
+    for i, r in enumerate(records):
+        cap = Path(captures_dir) / r["state_ref"]
+        files = {f"scan/{p.relative_to(cap / 'scan').as_posix()}": p.read_bytes()
+                 for p in sorted((cap / "scan").rglob("*")) if p.is_file()} if (cap / "scan").is_dir() else {}
+        if (cap / "files.diff").is_file():
+            files["target.diff"] = (cap / "files.diff").read_bytes()
+        nxt = records[i + 1]["step"] if i + 1 < len(records) else None
+        state.capture(run_dir, r["step"], files, from_role=r["step"],
+                      to_role=None if nxt == "end" else nxt, ts=r.get("t"),
+                      note=f"OpenAnt `{r['step']}` step report written" if r["step"] != "end" else "end of run")
+    manifest = state.load_manifest(run_dir)
+    out = handoff_records(manifest, [])
+    (Path(run_dir) / "handoffs.jsonl").write_text("".join(json.dumps(h) + "\n" for h in out))
+    return out
 
 
 # --- install / run / output (runtime) ---------------------------------------
@@ -235,9 +246,9 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     _ensure_proxy(gateway)
     proxy_url = f"http://{gateway}:{infra.PROXY_PORT}"
 
-    # ADR 0002: one per-run key per phase, so the proxy labels each call's role.
-    phase_keys = {p: infra.mint_key(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget, role=p)
-                  for p in PHASES}
+    # D2/ADR 0002: one key per phase (role), all in one team whose budget is the run cap (D6).
+    phase_keys = infra.mint_role_keys(run_id=run_id, kind=kind, system=SYSTEM, budget_usd=budget,
+                                      roles=list(PHASES))
     config = build_config(model, proxy_url, phase_keys)
     config_path = oa / "config.json"
     config_path.write_text(json.dumps(config, indent=2))
@@ -294,19 +305,17 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
         container.remove(force=True)
 
     _copy_out(workspace / "output" / "scan", oa / "scan")
-    _copy_out(workspace / "output" / "state", oa / "state")
+    _copy_out(workspace / "output" / "state", oa / "captures")
 
     findings = []
     try:
-        findings, extra = collect_findings(oa)
-        (run_dir / "findings.json").write_text(json.dumps({"findings": findings}, indent=2))
-        (run_dir / "extra_steps.jsonl").write_text("".join(json.dumps(s) + "\n" for s in extra))
+        findings = collect_outputs(run_dir)
     except Exception as e:
         error = (error + "; " if error else "") + f"output adapter: {e!r}"
 
     spends = {p: infra.key_spend(k) for p, k in phase_keys.items()}
     meta.update(finished_at=time.time(), error=error, runner_exit_code=exit_code,
-                key_spend=spends,
+                findings=len(findings), key_spend=spends,
                 total_spend_usd=round(sum((s.get("spend") or 0) for s in spends.values()), 4),
                 outcome=runner._outcome(run_dir, list(phase_keys.values()), budget, error),
                 isolation=events.verdict())
@@ -314,22 +323,23 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     return run_dir
 
 
-def collect_findings(oa_dir: Path) -> tuple[list[dict], list[dict]]:
-    """Normalized findings and the adapter's extra steps (hand-offs + OpenAnt's
-    own dynamic-test oracle runs) from the scan and state output."""
-    pipeline = _find_one(oa_dir / "scan", "pipeline_output.json")
+def collect_outputs(run_dir: Path) -> list[dict]:
+    """Output adapter: `findings.json`, `state/` + `handoffs.jsonl`, and
+    `oracle_runs.jsonl` (OpenAnt's dynamic tests) in the run folder."""
+    run_dir = Path(run_dir)
+    oa = run_dir / "openant"
+    pipeline = _find_one(oa / "scan", "pipeline_output.json")
     findings = normalize_findings(json.loads(pipeline.read_text())) if pipeline else []
+    (run_dir / "findings.json").write_text(json.dumps({"findings": findings}, indent=2))
 
-    handoffs = []
-    hpath = oa_dir / "state" / "handoffs.jsonl"
-    if hpath.exists():
-        handoffs = [json.loads(l) for l in hpath.read_text().splitlines() if l.strip()]
+    capture_state(run_dir, oa / "captures")
 
-    dynamic = _find_one(oa_dir / "scan", "dynamic_test_results.json")
+    dynamic = _find_one(oa / "scan", "dynamic_test_results.json")
     dyn = json.loads(dynamic.read_text()) if dynamic else None
-
-    extra = handoff_steps(handoffs) + dynamic_oracle_steps(dyn)
-    return findings, extra
+    ts = dynamic.stat().st_mtime if dynamic else None
+    (run_dir / "oracle_runs.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in dynamic_oracle_records(dyn, ts)))
+    return findings
 
 
 def _find_one(root: Path, name: str) -> Path | None:

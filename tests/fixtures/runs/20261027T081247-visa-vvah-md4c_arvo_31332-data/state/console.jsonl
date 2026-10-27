@@ -1,0 +1,335 @@
+{"t": 1793103329.393009, "line": "  12:15:29.392 WARN  v.b.l.cli.discovery : 'claude' not found on PATH; using bare name"}
+{"t": 1793103334.802785, "line": "  config overlay: /pilot/vvah/config.local.yaml applied (overrides: models.autoexclude.id, models.autoexclude.provider, models.autoexclude.via, models.chain.id, models.chain.provider, models.chain.via, models.decompose.id, models.decompose.provider, models.decompose.via, models.dedup.id, models.dedup.provider, models.dedup.via, models.deepdive.id, models.deepdive.provider, models.deepdive.via, models.exploit_verification.attacker.id, models.exploit_verification.attacker.provider, models.exploit_verification.attacker.via, models.exploit_verification.classify.id, models.exploit_verification.classify.provider, models.exploit_verification.classify.via, models.exploit_verification.judge.id, models.exploit_verification.judge.provider, models.exploit_verification.judge.via, models.exploit_verification.mapper.id, models.exploit_verification.mapper.provider, models.exploit_verification.mapper.via, models.preprocess.id, models.preprocess.provider, models.preprocess.via, models.remediate.id, models.remediate.provider, models.remediate.via, models.threatmodel.id, models.threatmodel.provider, models.threatmodel.via, models.validate.cross_repo_analyzer.id, models.validate.orchestrator.id, models.validate.orchestrator.provider, models.validate.orchestrator.via, models.validate.penetration_tester.id, models.validate.security_architect.id, models.verify.id, models.verify.provider, models.verify.via)"}
+{"t": 1793103335.5864596, "line": "  [manifest] git revision unavailable: RuntimeError: git exited 128"}
+{"t": 1793103335.6977105, "line": "  config: /pilot/vvah/config.yaml"}
+{"t": 1793103335.6984115, "line": "  step1 overlay: step1.auto_exclude (per-target checkpoints/step1.yaml will be derived)"}
+{"t": 1793103335.6995301, "line": "  12:15:35.698 WARN  v.orchestrator.entry : no CMDB file; VulContextSeverity environmental scoring skipped, CVSS and OffensivePriority still computed  path=/pilot/vvah/../../../inputs/cmdb.csv (CMDB_MISSING)"}
+{"t": 1793103335.7016351, "line": "  [auth] active backends: deepagents"}
+{"t": 1793103335.7058244, "line": "  \u2713 [deepagents] claude-haiku-5-5: Anthropic-compatible DeepAgents credential present"}
+{"t": 1793103335.707325, "line": "  [probe] live model connectivity (1 unique model/backend pair(s)):"}
+{"t": 1793103338.5545955, "line": "  \u2713 deepagents  claude-haiku-5-5  2.8s  autoexclude,preprocess,threatmodel,decompose,deepdive,verify,dedup,chain,remediate  "}
+{"t": 1793103338.5555384, "line": "  [probe] agentic backend path (1 agentic role/backend pair(s)):"}
+{"t": 1793103340.2819953, "line": "      [deepagents] tool read_file -> 37 chars [preflight-agentic]"}
+{"t": 1793103341.2181036, "line": "  \u2713 deepagents  claude-haiku-5-5  2.7s  preprocess,threatmodel,verify  "}
+{"t": 1793103341.218963, "line": "  \u2713 [probe] all model backends reachable"}
+{"t": 1793103341.3502614, "line": "  [auto-step1] surveying /src/md4c (27 files, prompt 5238 chars)"}
+{"t": 1793103342.9161937, "line": "  [auto-step1] wrote /pilot/vvah-state/checkpoints/508a9523542f3d2e196efcfa2a62fea5/step1.yaml  (+2 dirs, +0 exts, +1 globs)"}
+{"t": 1793103342.9192224, "line": "  [auto-step1] applied overlay  (exclude_dirs=7 exts=20 globs=2)"}
+{"t": 1793103342.9198973, "line": "Agentic SAST  repo=/src/md4c  module=md4c  app_id=-  run_id=508a9523542f3d2e196efcfa2a62fea5"}
+{"t": 1793103342.9202058, "line": "  models:"}
+{"t": 1793103342.9207604, "line": "    autoexclude -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9212465, "line": "    preprocess  -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.921774, "line": "    threatmodel -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9223025, "line": "    decompose   -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.922779, "line": "    deepdive    -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9232998, "line": "    verify      -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9237838, "line": "    dedup       -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9243636, "line": "    chain       -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9248521, "line": "    remediate   -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9253418, "line": "    validate    -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.925923, "line": "    exploit_verification.classify -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9264896, "line": "    exploit_verification.mapper -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9270303, "line": "    exploit_verification.attacker -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9275925, "line": "    exploit_verification.judge -> claude-haiku-5-5             [deepagents]"}
+{"t": 1793103342.9284072, "line": "  injected: 0 CVEs, 0 controls, app_profile=no"}
+{"t": 1793103342.9300373, "line": "[progress] stage-start s0    rules"}
+{"t": 1793103342.9301221, "line": "  \u25b6 [0/11] Step 0 \u2014 Static seed (rules) \u2026"}
+{"t": 1793103344.5014791, "line": "  \u2713 [0/11] Step 0 \u2014 Static seed (rules) (1.6s)"}
+{"t": 1793103344.5016305, "line": ""}
+{"t": 1793103344.5151327, "line": "  [ckpt] saved s0"}
+{"t": 1793103344.5567248, "line": "  [ckpt] saved s0_prov"}
+{"t": 1793103344.6025379, "line": "[progress] stage-done  s0   outcome=completed  1.6s  entry_points=0 sinks=0"}
+{"t": 1793103353.9452562, "line": "[progress] stage-start s1    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103353.9453955, "line": "  \u25b6 [1/11] Step 1 \u2014 Pre-process (claude-haiku-5-5 [deepagents]) \u2026"}
+{"t": 1793103353.9463017, "line": "[progress] discovered     15 files  (repo: md4c)"}
+{"t": 1793103356.8763497, "line": "  [s1] file inventory: 50 on disk -> 15 in scope (excluded: 33 dir, 0 ext, 2 glob, 0 oversize, 0 config-dedup)"}
+{"t": 1793103356.877388, "line": "  [s1] done  modules 10 \u00b7 entry points 0 \u00b7 sinks 0 \u00b7 files in scope 15"}
+{"t": 1793103356.877513, "line": "  \u2713 [1/11] Step 1 \u2014 Pre-process (claude-haiku-5-5 [deepagents]) (2.9s)"}
+{"t": 1793103356.877537, "line": ""}
+{"t": 1793103356.9077265, "line": "  [ckpt] saved s1"}
+{"t": 1793103356.9777603, "line": "  [ckpt] saved s1_prov"}
+{"t": 1793103357.029918, "line": "[progress] stage-done  s1   outcome=completed  3.0s  files=15"}
+{"t": 1793103357.0332422, "line": "[progress] stage-start s2    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103357.0333922, "line": "  \u25b6 [2/11] Step 2 \u2014 Threat model (claude-haiku-5-5 [deepagents]) \u2026"}
+{"t": 1793103357.0521371, "line": "  [s2] evidence  files 15 \u00b7 modules 10 \u00b7 entry points 0 \u00b7 config reps 3 \u00b7 api artefacts 0 \u00b7 docs 2 \u00b7 manifests 0"}
+{"t": 1793103357.0528986, "line": "[progress] stage-note  s2   evidence files=15 modules=10 entry_points=0 config_reps=3 api_artefacts=0 docs=2 manifests=0"}
+{"t": 1793103357.0533895, "line": "  [s2] frontier: 15 / 15 files (AST-focused evidence view)"}
+{"t": 1793103357.054161, "line": "  [s2] baseline=auto repo_kind=['native']"}
+{"t": 1793103357.0548172, "line": "[progress] stage-note  s2   threat-model LLM request started"}
+{"t": 1793103357.1387358, "line": "WARN [deepagents]: claude-haiku-5-5 has manual (`enabled`) thinking, so langchain drops the forced tool_choice for this build's structured output -- the session falls back to a textual submit instruction in the system prompt instead of a forced tool call. The structured-output tool is still advertised and validated when called; a reply that skips it is re-asked in-session by the stage's own evidence or plan gate, not by this hook."}
+{"t": 1793103359.526581, "line": "      [deepagents] tool read_file -> 2043 chars [s2-threatmodel]"}
+{"t": 1793103359.528187, "line": "      [deepagents] tool read_file -> 1957 chars [s2-threatmodel]"}
+{"t": 1793103373.2930994, "line": "      [deepagents] tool GraphSinksInCommunity -> 0 chars [s2-threatmodel]"}
+{"t": 1793103373.294098, "line": "      [deepagents] tool GraphCommunityOf -> 4 chars [s2-threatmodel]"}
+{"t": 1793103373.3748193, "line": "      [deepagents] tool GraphNeighbors -> 30 chars [s2-threatmodel]"}
+{"t": 1793103384.3945887, "line": "[progress] stage-note  s2   threat-model LLM response received"}
+{"t": 1793103384.398468, "line": "  [s2] surface_files: 11 of 11 path(s) across 7 threat(s) resolved to an in-scope file"}
+{"t": 1793103384.3995912, "line": "  [s2] done  assets 3 \u00b7 trust boundaries 2 \u00b7 threats 7"}
+{"t": 1793103384.3997889, "line": "  \u2713 [2/11] Step 2 \u2014 Threat model (claude-haiku-5-5 [deepagents]) (27.4s)"}
+{"t": 1793103384.3998106, "line": ""}
+{"t": 1793103384.4193187, "line": "  [ckpt] saved s2"}
+{"t": 1793103384.5139446, "line": "  [ckpt] saved s2_prov"}
+{"t": 1793103384.562571, "line": "[progress] stage-done  s2   outcome=completed  27.5s  assets=3 boundaries=2 threats=7"}
+{"t": 1793103384.5667229, "line": "[progress] stage-start s3    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103384.5668683, "line": "  \u25b6 [3/11] Step 3 \u2014 Decompose (claude-haiku-5-5 [deepagents]) \u2026"}
+{"t": 1793103384.5720832, "line": "    [s3] threats: 7 unit(s) from 7/7 threat(s) with a validated surface"}
+{"t": 1793103384.5730581, "line": "    [s3] coverage: 11/15 file(s) named by no threat's surface \u2014 never reviewed"}
+{"t": 1793103384.5737886, "line": "    [s3] unit LOC: n=7 min=573 p50=6.4k p90=7.0k max=7.0k"}
+{"t": 1793103384.5743494, "line": "[progress] queued      threat-t1        (rank=20, lens=c-cpp, 1 file)"}
+{"t": 1793103384.5748622, "line": "[progress] queued      threat-t2        (rank=20, lens=c-cpp, 1 file)"}
+{"t": 1793103384.5753922, "line": "[progress] queued      threat-t3        (rank=20, lens=c-cpp, 2 files)"}
+{"t": 1793103384.5758977, "line": "[progress] queued      threat-t4        (rank=23, lens=c-cpp, 1 file)"}
+{"t": 1793103384.5764315, "line": "[progress] queued      threat-t6        (rank=23, lens=c-cpp, 2 files)"}
+{"t": 1793103384.5769365, "line": "[progress] queued      threat-t5        (rank=24, lens=c-cpp, 1 file)"}
+{"t": 1793103384.5774972, "line": "[progress] queued      threat-t7        (rank=22, lens=c-cpp, 3 files)"}
+{"t": 1793103384.5779746, "line": "  [s3] done: 7 unit(s) (7 threat(s)), top risk = threat-t1"}
+{"t": 1793103384.5780847, "line": "  \u2713 [3/11] Step 3 \u2014 Decompose (claude-haiku-5-5 [deepagents]) (0.0s)"}
+{"t": 1793103384.5781047, "line": ""}
+{"t": 1793103384.5862975, "line": "  [ckpt] saved s3"}
+{"t": 1793103384.7246034, "line": "  [ckpt] saved s3_prov"}
+{"t": 1793103384.8255224, "line": "[progress] stage-done  s3   outcome=completed  0.2s  units=7"}
+{"t": 1793103384.8260937, "line": "[progress] stage-start s4    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103384.8262663, "line": "  \u25b6 [4/11] Step 4 \u2014 Deep-dive (claude-haiku-5-5 [deepagents]; parallel=12) \u2026"}
+{"t": 1793103384.8332105, "line": "  [s4] processing 7 units (12 parallel)..."}
+{"t": 1793103384.8337362, "line": "  [s4] batched 7 units into 2 sessions"}
+{"t": 1793103384.834696, "line": "  [s4] unit threat-t1 (medium, rank 20, lens=c-cpp): Crafted Markdown causes out-of-bounds read or write in the parser, leading to memory corruption in the host process."}
+{"t": 1793103384.8352072, "line": "[progress] scanning    threat-t1         [1 file]  (1 / 7 units)"}
+{"t": 1793103384.8360512, "line": "  [s4] unit threat-t2 (medium, rank 20, lens=c-cpp): Use-after-free or double-free in parser block/span tree or ref-def hashtable handling on crafted input."}
+{"t": 1793103384.8377395, "line": "[progress] scanning    threat-t2         [1 file]  (2 / 7 units)"}
+{"t": 1793103384.8388016, "line": "  [s4] unit threat-t3 (medium, rank 20, lens=c-cpp): Integer overflow in size computation before allocation in parser or HTML renderer yields undersized buffer and heap over\u2026"}
+{"t": 1793103384.8393142, "line": "[progress] scanning    threat-t3         [2 files]  (3 / 7 units)"}
+{"t": 1793103384.8403325, "line": "  [s4] unit threat-t7 (medium, rank 22, lens=c-cpp): Entity lookup in entity.c reads past the end of its table on crafted entity names, leaking adjacent memory into rendered\u2026"}
+{"t": 1793103384.8407936, "line": "[progress] scanning    threat-t7         [3 files]  (4 / 7 units)"}
+{"t": 1793103384.8420916, "line": "  [s4] unit threat-t4 (small, rank 23, lens=c-cpp): Attacker-controlled text used as a printf-style format string in parser or renderer diagnostics."}
+{"t": 1793103384.8426745, "line": "[progress] scanning    threat-t4         [1 file]  (5 / 7 units)"}
+{"t": 1793103384.843503, "line": "  [s4] unit threat-t6 (medium, rank 23, lens=c-cpp): Input reaches a shell via system() or exec() in the library or its md2html driver."}
+{"t": 1793103384.8439794, "line": "[progress] scanning    threat-t6         [2 files]  (6 / 7 units)"}
+{"t": 1793103384.8449724, "line": "  [s4] unit threat-t5 (medium, rank 24, lens=c-cpp): Race or TOCTOU between size check and use in shared parser state when the library is used from multiple threads."}
+{"t": 1793103384.8455079, "line": "[progress] scanning    threat-t5         [1 file]  (7 / 7 units)"}
+{"t": 1793103392.5790071, "line": "      [deepagents] tool GraphContext -> 345 chars [s4-deepdive]"}
+{"t": 1793103392.675291, "line": "      [deepagents] tool GraphContext -> 263 chars [s4-deepdive]"}
+{"t": 1793103395.5152571, "line": "      [deepagents] tool GraphSinksInCommunity -> 0 chars [s4-deepdive]"}
+{"t": 1793103395.742481, "line": "      [deepagents] tool GraphContext -> 174 chars [s4-deepdive]"}
+{"t": 1793103395.952162, "line": "      [deepagents] tool GraphSinksInCommunity -> 0 chars [s4-deepdive]"}
+{"t": 1793103395.9527528, "line": "      [deepagents] tool GraphSinksInCommunity -> 0 chars [s4-deepdive]"}
+{"t": 1793103396.054902, "line": "      [deepagents] tool grep -> 544 chars [s4-deepdive]"}
+{"t": 1793103396.0720394, "line": "      [deepagents] tool grep -> 16 chars [s4-deepdive]"}
+{"t": 1793103399.3958967, "line": "      [deepagents] tool GraphImpact -> 318 chars [s4-deepdive]"}
+{"t": 1793103400.9207723, "line": "      [deepagents] tool grep -> 16 chars [s4-deepdive]"}
+{"t": 1793103401.080428, "line": "      [deepagents] tool GraphContext -> 188 chars [s4-deepdive]"}
+{"t": 1793103402.607548, "line": "      [deepagents] tool grep -> 31 chars [s4-deepdive]"}
+{"t": 1793103405.6483054, "line": "      [deepagents] tool GraphContext -> 337 chars [s4-deepdive]"}
+{"t": 1793103407.1466126, "line": "[progress] scanned     threat-t4         outcome=completed  22.3s  \u2713"}
+{"t": 1793103407.1469204, "line": "  [s4] unit threat-t4: 0 findings"}
+{"t": 1793103407.1475368, "line": "[progress] scanned     threat-t6         outcome=completed  22.3s  \u2713"}
+{"t": 1793103407.147911, "line": "  [s4] unit threat-t6: 0 findings"}
+{"t": 1793103407.1485286, "line": "[progress] scanned     threat-t5         outcome=completed  22.3s  \u2713"}
+{"t": 1793103407.14894, "line": "  [s4] unit threat-t5: 0 findings"}
+{"t": 1793103408.275571, "line": "      [deepagents] tool GraphImpact -> 308 chars [s4-deepdive]"}
+{"t": 1793103410.9352336, "line": "      [deepagents] tool GraphNeighbors -> 281 chars [s4-deepdive]"}
+{"t": 1793103413.5054307, "line": "      [deepagents] tool GraphNeighbors -> 272 chars [s4-deepdive]"}
+{"t": 1793103416.1309273, "line": "      [deepagents] tool GraphNeighbors -> 414 chars [s4-deepdive]"}
+{"t": 1793103418.782758, "line": "      [deepagents] tool GraphNeighbors -> 177 chars [s4-deepdive]"}
+{"t": 1793103429.1082683, "line": "[progress] scanned     threat-t1         outcome=completed  44.3s  \u2713"}
+{"t": 1793103429.1086535, "line": "  [s4] unit threat-t1: 0 findings"}
+{"t": 1793103429.1092098, "line": "[progress] scanned     threat-t2         outcome=completed  44.3s  \u2713"}
+{"t": 1793103429.109595, "line": "  [s4] unit threat-t2: 0 findings"}
+{"t": 1793103429.110128, "line": "[progress] scanned     threat-t3         outcome=completed  44.3s  \u2713"}
+{"t": 1793103429.1105292, "line": "  [s4] unit threat-t3: 0 findings"}
+{"t": 1793103429.1110551, "line": "[progress] scanned     threat-t7         outcome=completed  44.3s  \u2713"}
+{"t": 1793103429.1114502, "line": "  [s4] unit threat-t7: 0 findings"}
+{"t": 1793103429.1125112, "line": "[progress] summary     7 / 7 units done  |  scanned=4 files  elapsed=44.3s"}
+{"t": 1793103429.1128724, "line": "           outcomes:  completed=7"}
+{"t": 1793103429.1133642, "line": "           unit=threat-t1         outcome=completed  44.3s"}
+{"t": 1793103429.1138127, "line": "           unit=threat-t2         outcome=completed  44.3s"}
+{"t": 1793103429.1142707, "line": "           unit=threat-t3         outcome=completed  44.3s"}
+{"t": 1793103429.1147218, "line": "           unit=threat-t4         outcome=completed  22.3s"}
+{"t": 1793103429.115184, "line": "           unit=threat-t5         outcome=completed  22.3s"}
+{"t": 1793103429.1156394, "line": "           unit=threat-t6         outcome=completed  22.3s"}
+{"t": 1793103429.1160815, "line": "           unit=threat-t7         outcome=completed  44.3s"}
+{"t": 1793103429.1162362, "line": "  \u2713 [4/11] Step 4 \u2014 Deep-dive (claude-haiku-5-5 [deepagents]; parallel=12) (44.3s)"}
+{"t": 1793103429.1162596, "line": ""}
+{"t": 1793103429.124183, "line": "  [ckpt] saved s4"}
+{"t": 1793103429.2065732, "line": "  [ckpt] saved s4_prov"}
+{"t": 1793103429.271124, "line": "[progress] stage-done  s4   outcome=completed  44.4s  findings=0"}
+{"t": 1793103429.271606, "line": "[progress] stage-start s5    enrich"}
+{"t": 1793103429.271698, "line": "  \u25b6 [5/11] Step 5 \u2014 Enrich (snippet + evidence refs, deterministic) \u2026"}
+{"t": 1793103429.2855349, "line": "  [s5-enrich] 0 \u2192 0 (nothing dropped)"}
+{"t": 1793103429.2856116, "line": "  \u2713 [5/11] Step 5 \u2014 Enrich (snippet + evidence refs, deterministic) (0.0s)"}
+{"t": 1793103429.2856307, "line": ""}
+{"t": 1793103429.2948108, "line": "  [ckpt] saved s5"}
+{"t": 1793103429.371202, "line": "  [ckpt] saved s5_prov"}
+{"t": 1793103429.4177234, "line": "[progress] stage-done  s5   outcome=completed  0.1s  kept=0 dropped=0"}
+{"t": 1793103429.4245508, "line": "[progress] stage-start s6    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103429.4246469, "line": "  \u25b6 [6/11] Step 6 \u2014 Verify (claude-haiku-5-5 [deepagents]) \u2026"}
+{"t": 1793103429.424812, "line": "  \u2713 [6/11] Step 6 \u2014 Verify (claude-haiku-5-5 [deepagents]) (0.0s)"}
+{"t": 1793103429.4248328, "line": ""}
+{"t": 1793103429.440744, "line": "  [ckpt] saved s6"}
+{"t": 1793103429.4880893, "line": "  [ckpt] saved s6_prov"}
+{"t": 1793103429.6638446, "line": "[progress] stage-done  s6   outcome=completed  0.1s  verified=0 dropped=0"}
+{"t": 1793103429.6702797, "line": "[progress] stage-start s7    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103429.670437, "line": "  \u25b6 [7/11] Step 7 \u2014 Dedup (claude-haiku-5-5 [deepagents]) \u2026"}
+{"t": 1793103429.6705015, "line": "  \u2713 [7/11] Step 7 \u2014 Dedup (claude-haiku-5-5 [deepagents]) (0.0s)"}
+{"t": 1793103429.670522, "line": ""}
+{"t": 1793103429.6711304, "line": "[progress] stage-done  s7   outcome=completed  0.0s  canonical=0 dup_dropped=0"}
+{"t": 1793103429.7333252, "line": "  [ckpt] saved s7"}
+{"t": 1793103429.8131378, "line": "  [ckpt] saved s7_prov"}
+{"t": 1793103429.8905895, "line": "  [ckpt] s7 saved (run_id 508a9523542f3d2e196efcfa2a62fea5); resume with: vvaharness scan --repo /src/md4c --config /pilot/vvah/config.yaml --resume"}
+{"t": 1793103429.9055157, "line": "[progress] stage-start s8    claude-haiku-5-5 [deepagents]"}
+{"t": 1793103429.9056299, "line": "  \u25b6 [8/11] Step 8 \u2014 Chain (claude-haiku-5-5 [deepagents]) \u2026"}
+{"t": 1793103429.9057415, "line": "  \u2713 [8/11] Step 8 \u2014 Chain (claude-haiku-5-5 [deepagents]) (0.0s)"}
+{"t": 1793103429.9057617, "line": ""}
+{"t": 1793103429.9599183, "line": "  [ckpt] saved s8"}
+{"t": 1793103430.0469806, "line": "  [ckpt] saved s8_prov"}
+{"t": 1793103430.0854356, "line": "[progress] stage-done  s8   outcome=completed  0.1s  findings=0 chains=0"}
+{"t": 1793103430.0860062, "line": "  [case] 0 case id(s) minted, 0 already assigned"}
+{"t": 1793103430.1084845, "line": "  [out] wrote /src/md4c/security-scan/findings.json"}
+{"t": 1793103430.1360576, "line": "  [out] wrote /src/md4c/security-scan/md4c_20261027T121541Z_report.md"}
+{"t": 1793103430.1364722, "line": "[progress] stage-start s9    sarif"}
+{"t": 1793103430.136551, "line": "  \u25b6 [9/11] Step 9 \u2014 SARIF (app_id=-) \u2026"}
+{"t": 1793103430.1385472, "line": "  SARIF written: /src/md4c/security-scan/md4c_20261027T121541Z_report.sarif (0 results)"}
+{"t": 1793103430.1386182, "line": "  \u2713 [9/11] Step 9 \u2014 SARIF (app_id=-) (0.0s)"}
+{"t": 1793103430.138638, "line": ""}
+{"t": 1793103430.1391253, "line": "  [out] wrote /src/md4c/security-scan/md4c_20261027T121541Z_report.sarif"}
+{"t": 1793103430.1588016, "line": "  [ckpt] saved s9"}
+{"t": 1793103430.2025695, "line": "[progress] stage-done  s9   outcome=completed  0.1s  sarif=md4c_20261027T121541Z_report.sarif"}
+{"t": 1793103430.2030492, "line": "  [ingest] no output.ingest_url configured - skipping"}
+{"t": 1793103430.2035804, "line": "[progress] stage-done  s10  outcome=disabled  0.0s"}
+{"t": 1793103430.2040718, "line": "[progress] stage-done  s11  outcome=disabled  0.0s"}
+{"t": 1793103430.2047718, "line": ""}
+{"t": 1793103430.204795, "line": "Done in 89s. 0 verified findings (0 dropped), 0 chains."}
+{"t": 1793103430.205421, "line": "Tokens: [REDACTED-SECRET], completion=5781, total=1071177"}
+{"t": 1793103430.2058954, "line": "Report: /src/md4c/security-scan/md4c_20261027T121541Z_report.md"}
+{"t": 1793103430.2059484, "line": "# Agentic SAST \u2014 md4c"}
+{"t": 1793103430.2059684, "line": ""}
+{"t": 1793103430.2059855, "line": "## Summary"}
+{"t": 1793103430.206003, "line": "No findings survived adversarial verification."}
+{"t": 1793103430.20602, "line": ""}
+{"t": 1793103430.2060466, "line": "_No CMDB/application context was supplied for this scan \u2014 OffensivePriority is capped at its lowest reachable tier (P3/P4) for every finding below; it is not an individual low-priority assessment._"}
+{"t": 1793103430.206066, "line": ""}
+{"t": 1793103430.2060828, "line": "## Scan Metrics"}
+{"t": 1793103430.2061, "line": ""}
+{"t": 1793103430.206117, "line": "- Scan ID: 2026-10-27T12:15:41Z__md4c"}
+{"t": 1793103430.206134, "line": "- Module: md4c"}
+{"t": 1793103430.2061515, "line": "- Start: 2026-10-27T12:15:41Z"}
+{"t": 1793103430.2061892, "line": "- End: 2026-10-27T12:17:09Z"}
+{"t": 1793103430.2062109, "line": "- Duration (sec): 88"}
+{"t": 1793103430.2062306, "line": "- Files in scope: 15"}
+{"t": 1793103430.2062519, "line": "- Files analyzed (unique): 4"}
+{"t": 1793103430.2062726, "line": "- Coverage: 26.7% (files analyzed / files in scope)"}
+{"t": 1793103430.2063036, "line": "- Chunks: 7 (threat=7)"}
+{"t": 1793103430.2063239, "line": "- Tokens (prompt): 1065396"}
+{"t": 1793103430.2063434, "line": "- Tokens (completion): 5781"}
+{"t": 1793103430.2063632, "line": "- Tokens (total): 1071177"}
+{"t": 1793103430.2063835, "line": ""}
+{"t": 1793103430.2064035, "line": "- Folders scanned: 2"}
+{"t": 1793103430.206423, "line": "### Pipeline Diagnostics"}
+{"t": 1793103430.2064428, "line": ""}
+{"t": 1793103430.2064652, "line": "- Threats identified before ranking: 7"}
+{"t": 1793103430.2064865, "line": "- Repository kind(s) detected: native"}
+{"t": 1793103430.206508, "line": "- Files named by no investigation unit: 11 of 15 in-scope file(s) got no reviewer \u2014 set output.emit_unreachable_appendix: true to list them in the report."}
+{"t": 1793103430.2065268, "line": ""}
+{"t": 1793103430.2065437, "line": "### Tokens by Phase"}
+{"t": 1793103430.2065606, "line": ""}
+{"t": 1793103430.2065773, "line": "_Prompt = fresh + cache-write (billable). Cache-read shown separately, NOT included in totals._"}
+{"t": 1793103430.2065947, "line": ""}
+{"t": 1793103430.2066116, "line": "| Phase | Calls | Prompt | Completion | Total | % | Cache-read (excl.) |"}
+{"t": 1793103430.2066307, "line": "|---|---:|---:|---:|---:|---:|---:|"}
+{"t": 1793103430.2066479, "line": "| s4-deepdive | 14 | 1,009,211 | 2,864 | 1,012,075 | 94.5 | 1,899,725 |"}
+{"t": 1793103430.2066653, "line": "| s2-threatmodel | 3 | 47,418 | 2,778 | 50,196 | 4.7 | 25,590 |"}
+{"t": 1793103430.2066827, "line": "| unscoped (outside stage wrapper) | 3 | 5,233 | 88 | 5,321 | 0.5 | 2,583 |"}
+{"t": 1793103430.2067003, "line": "| s1-autoexclude | 1 | 3,534 | 51 | 3,585 | 0.3 | 0 |"}
+{"t": 1793103430.2067246, "line": ""}
+{"t": 1793103430.206742, "line": "### Language LOC Coverage"}
+{"t": 1793103430.206759, "line": ""}
+{"t": 1793103430.2067757, "line": "| Language | LOC in scope | LOC scanned | Coverage % |"}
+{"t": 1793103430.2067926, "line": "|---|---:|---:|---:|"}
+{"t": 1793103430.2068098, "line": "| c-cpp | 8505 | 8106 | 95.3 |"}
+{"t": 1793103430.206827, "line": "| other | 644 | 0 | 0.0 |"}
+{"t": 1793103430.2068439, "line": ""}
+{"t": 1793103430.2068608, "line": "## Threat Model"}
+{"t": 1793103430.2068777, "line": ""}
+{"t": 1793103430.2068946, "line": "### System context"}
+{"t": 1793103430.2069116, "line": ""}
+{"t": 1793103430.2069302, "line": "MD4C is a C library (src/md4c.c, md4c.h, md4c-html.c, md4c-html.h, entity.c, entity.h) that parses CommonMark-style Markdown from a caller-supplied byte buffer and calls back into the host application, plus an HTML renderer built on it. It is embedded as a library, not a network service. Untrusted Markdown input is the primary data entering the process, and the library's callers decide whether that input is trusted. Build and CI are CMake plus Travis/AppVeyor with -Werror and coverage. No dependency manifests, no API contract artefacts and no runtime configuration were present in the snapshot."}
+{"t": 1793103430.2069519, "line": ""}
+{"t": 1793103430.206969, "line": "### Assets"}
+{"t": 1793103430.206986, "line": ""}
+{"t": 1793103430.2070026, "line": "| Asset | Sensitivity | Description |"}
+{"t": 1793103430.2070198, "line": "|---|---|---|"}
+{"t": 1793103430.2070372, "line": "| host process memory | high | Heap and stack of the embedding application that md4c parses into; memory-safety failures here are the main impact. |"}
+{"t": 1793103430.2070553, "line": "| parser availability | medium | Ability of the host to parse untrusted input in bounded time and memory. |"}
+{"t": 1793103430.2070732, "line": "| rendered HTML output | medium | HTML produced by md_html(); correctness and escaping affect downstream consumers. |"}
+{"t": 1793103430.2070906, "line": ""}
+{"t": 1793103430.2071075, "line": "### Trust boundaries"}
+{"t": 1793103430.2071245, "line": ""}
+{"t": 1793103430.2071419, "line": "- **md_parse() input buffer (src/md4c.c)** \u2014 untrusted Markdown bytes -&gt; parser internals \u2192 host process memory, parser availability"}
+{"t": 1793103430.2071605, "line": "- **md_html() input and callback (src/md4c-html.c)** \u2014 untrusted Markdown -&gt; HTML renderer output \u2192 rendered HTML output, host process memory"}
+{"t": 1793103430.2072043, "line": ""}
+{"t": 1793103430.2072222, "line": "### Ranked threats"}
+{"t": 1793103430.2072392, "line": ""}
+{"t": 1793103430.2072563, "line": "| ID | Threat | Actor | Surface | Asset | Impact | Likelihood | Controls | Investigation unit |"}
+{"t": 1793103430.2072737, "line": "|---|---|---|---|---|---|---|---|---|"}
+{"t": 1793103430.2073035, "line": "| T1 | Crafted Markdown causes out-of-bounds read or write in the parser, leading to memory corruption in the host process. | remote_unauth | md_parse() input buffer (src/md4c.c) | host process memory | high | rare | Fuzzing history and bounds-fix commits (0.3.0 entity bounds, 0.3.3 fuzz fix); no sanitizer evidence in snapshot. | minted |"}
+{"t": 1793103430.2073238, "line": "| T2 | Use-after-free or double-free in parser block/span tree or ref-def hashtable handling on crafted input. | remote_unauth | md_parse() input buffer (src/md4c.c) | host process memory | high | rare | none evident in structural snapshot; source not read. | minted |"}
+{"t": 1793103430.2073429, "line": "| T3 | Integer overflow in size computation before allocation in parser or HTML renderer yields undersized buffer and heap overflow. | remote_unauth | md_parse() input buffer (src/md4c.c) | host process memory | high | rare | unknown; source not inspected. | minted |"}
+{"t": 1793103430.2073615, "line": "| T4 | Attacker-controlled text used as a printf-style format string in parser or renderer diagnostics. | remote_unauth | md_html() input and callback (src/md4c-html.c) | host process memory | high | very_rare | HTML renderer writes output via callbacks rather than printf-family calls with input; not confirmed. | minted |"}
+{"t": 1793103430.2073863, "line": "| T6 | Input reaches a shell via system() or exec() in the library or its md2html driver. | remote_unauth | md_html() input and callback (src/md4c-html.c) | host process memory | high | very_rare | library has no process-spawning code by design; not confirmed in source. | minted |"}
+{"t": 1793103430.2074058, "line": "| T5 | Race or TOCTOU between size check and use in shared parser state when the library is used from multiple threads. | local_user | md_parse() input buffer (src/md4c.c) | host process memory | medium | very_rare | parser state is per-call; no shared globals seen in structure. | minted |"}
+{"t": 1793103430.2074249, "line": "| T7 | Entity lookup in entity.c reads past the end of its table on crafted entity names, leaking adjacent memory into rendered output. | remote_unauth | md_html() input and callback (src/md4c-html.c) | rendered HTML output | medium | rare | Bounds fix for md_is_entity_str per CHANGELOG 0.3.0; current code not read. | minted |"}
+{"t": 1793103430.2074435, "line": ""}
+{"t": 1793103430.2074604, "line": "### Open questions"}
+{"t": 1793103430.207477, "line": ""}
+{"t": 1793103430.2074943, "line": "_Model-authored during threat modeling \u2014 an estimate, not a computed count; see this report's own coverage figures (e.g. unreachable files, below) for the deterministic numbers._"}
+{"t": 1793103430.2075126, "line": ""}
+{"t": 1793103430.20753, "line": "- unreviewed: 5 file(s) \u2014 build and metadata files (CMakeLists.txt, src/CMakeLists.txt, md4c.pc.in, md4c-html.pc.in, CI yml) carry no security weakness class that the snapshot supports; not opened because the tool budget was exhausted."}
+{"t": 1793103430.207549, "line": "- Source bodies were not read, so every memory-safety threat is likelihood-rated from CHANGELOG history rather than confirmed in code."}
+{"t": 1793103430.2075672, "line": "- Deployment exposure is unknown: whether untrusted Markdown reaches md_parse() directly or through a sanitising layer."}
+{"t": 1793103430.2075849, "line": "- Whether the host application uses MD4C from multiple threads, which decides T5."}
+{"t": 1793103430.2076025, "line": "- Whether md2html (excluded from coverage, not in inventory) is shipped and exposed, which decides T6."}
+{"t": 1793103430.20762, "line": ""}
+{"t": 1793103430.2076366, "line": "## Verification"}
+{"t": 1793103430.2076535, "line": "- Raw findings (pre-verification): 0"}
+{"t": 1793103430.2076707, "line": "- Verified true positives: 0 \u2192 0 reported after dedup"}
+{"t": 1793103430.2076883, "line": "- False positives (dropped): 0"}
+{"t": 1793103430.2077055, "line": "- Unconfirmed (dropped \u2014 verifier confidence below the gate): 0"}
+{"t": 1793103430.2077234, "line": "- Verifier errors or inconclusive (excluded \u2014 undetermined, not confirmed clean): 0"}
+{"t": 1793103430.207741, "line": "- Duplicates collapsed (all passes): 0 \u2014 0 before verification, 0 after"}
+{"t": 1793103430.2077584, "line": "- Verifier confirmation rate: n/a (no TRUE_POSITIVE/FALSE_POSITIVE verdicts)"}
+{"t": 1793103430.207776, "line": "  - True positives as a share of the verifier's true- and false-positive verdicts on candidates the harness itself produced; the harness grading its own findings, not precision against ground truth."}
+{"t": 1793103430.207794, "line": ""}
+{"t": 1793103430.2078109, "line": "## Findings (0)"}
+{"t": 1793103430.2078278, "line": ""}
+{"t": 1793103430.2078445, "line": "## Exploit Chains"}
+{"t": 1793103430.2078614, "line": ""}
+{"t": 1793103430.2078784, "line": "No exploit chains were identified \u2014 no chain entry combining findings reached this report."}
+{"t": 1793103430.2078958, "line": ""}
+{"t": 1793103430.2079124, "line": ""}
+{"t": 1793103430.2079294, "line": "## Dropped Findings"}
+{"t": 1793103430.2079463, "line": ""}
+{"t": 1793103430.2079632, "line": "_None._"}
+{"t": 1793103430.2079797, "line": ""}
+{"t": 1793103430.2079964, "line": ""}
+{"t": 1793103430.2080169, "line": "---"}
+{"t": 1793103430.208034, "line": ""}
+{"t": 1793103430.208051, "line": "## Appendix: Scan Scope"}
+{"t": 1793103430.208068, "line": ""}
+{"t": 1793103430.2080846, "line": "### Folders scanned (2)"}
+{"t": 1793103430.2081013, "line": ""}
+{"t": 1793103430.2081182, "line": "- `./`"}
+{"t": 1793103430.2081351, "line": "- `src/`"}
+{"t": 1793103430.208152, "line": ""}
+{"t": 1793103430.208186, "line": "### Excluded from scan (35 files)"}
+{"t": 1793103430.2082083, "line": ""}
+{"t": 1793103430.2082255, "line": "**Folders** (matched `exclude_dirs`):"}
+{"t": 1793103430.2082427, "line": ""}
+{"t": 1793103430.2082596, "line": "- `test/` \u2014 21 file(s)"}
+{"t": 1793103430.208277, "line": "- `scripts/` \u2014 7 file(s)"}
+{"t": 1793103430.208305, "line": "- `md2html/` \u2014 5 file(s)"}
+{"t": 1793103430.2083218, "line": ""}
+{"t": 1793103430.2083387, "line": "**Patterns** (matched `exclude_globs`):"}
+{"t": 1793103430.2083557, "line": ""}
+{"t": 1793103430.208372, "line": "- `**/LICENSE.*` \u2014 1 file(s)"}
+{"t": 1793103430.2083893, "line": "- `**/.gitignore` \u2014 1 file(s)"}
+{"t": 1793103430.2084062, "line": ""}
+{"t": 1793103430.4158382, "line": "  [manifest] wrote /pilot/work/run_manifest_20261027T121534Z.json"}

@@ -31,8 +31,8 @@
   openant_dynamic_test`). Where a build does happen (non-C), it goes through
   `isolation.build_image` (registry allowlist, logged).
 - State (D5): `openant_collector.py` captures the scan dir at each
-  `<step>.report.json` hand-off and at the end; `handoff_steps` turns those
-  into `handoff` steps.
+  `<step>.report.json` hand-off and at the end; `capture_state` turns those (pilot.state +
+  `handoffs.jsonl`) into `handoff` steps; dynamic tests go to `oracle_runs.jsonl`.
 - Output: `normalize_findings(pipeline_output.json)` → `findings.json`
   (location-based on a C target; `tp_target` via `verdicts.py`
   location_overlap). No PoC bytes and no patch on C unless `openant patch`

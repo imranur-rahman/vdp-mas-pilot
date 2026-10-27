@@ -8,10 +8,17 @@ from pathlib import Path
 
 import httpx
 
-REPO = Path(__file__).resolve().parents[2]
+CODE = Path(__file__).resolve().parents[2]
+# The checkout that holds `.env`, task data, the CyberGym submodule, `runs/`
+# and the running proxy stack. PILOT_HOME lets code in a git worktree use the
+# main checkout's, so it neither restarts the shared proxy nor splits run folders.
+REPO = Path(os.environ.get("PILOT_HOME") or CODE).resolve()
+SYSTEMS = CODE / "systems"  # system adapter files live with the code (this worktree)
 CYBERGYM = REPO / "vendor" / "cybergym-e2e"
 CYBERGYM_SCRIPTS = CYBERGYM / "scripts"
-RUNS = REPO / "runs"
+# The proxy writes each run's log under the runs folder it has mounted; a
+# worktree that shares the running proxy sets PILOT_RUNS_DIR to that folder.
+RUNS = Path(os.environ.get("PILOT_RUNS_DIR") or REPO / "runs")
 # A second proxy stack (another worktree, a demo) can run beside the shared
 # one under its own compose project and port; the defaults are the shared stack.
 COMPOSE_PROJECT = os.environ.get("PILOT_COMPOSE_PROJECT", "pilot")
@@ -89,3 +96,26 @@ def key_spend(key: str) -> dict:
     r.raise_for_status()
     info = r.json().get("info", {})
     return {"spend": info.get("spend"), "max_budget": info.get("max_budget")}
+
+
+def mint_role_keys(*, run_id: str, kind: str, system: str, budget_usd: float, roles: list[str],
+                   base: str | None = None, master: str | None = None) -> dict[str, str]:
+    """One virtual key per role (D2), all in one LiteLLM team whose budget is the run's cap (D6).
+
+    Each key carries the role in its metadata, so the proxy log labels every
+    call with it; the team's budget caps the run's total spend across roles.
+    """
+    base = base or f"http://127.0.0.1:{PROXY_PORT}"
+    headers = {"Authorization": f"Bearer {master or load_env()['LITELLM_MASTER_KEY']}"}
+    r = httpx.post(f"{base}/team/new", headers=headers, timeout=60,
+                   json={"team_alias": run_id, "max_budget": budget_usd})
+    r.raise_for_status()
+    team = r.json()["team_id"]
+    keys = {}
+    for role in roles:
+        meta = {"pilot_run_id": run_id, "pilot_run_kind": kind, "pilot_system": system, "pilot_role": role}
+        r = httpx.post(f"{base}/key/generate", headers=headers, timeout=60,
+                       json={"key_alias": f"{run_id}:{role}", "team_id": team, "metadata": meta})
+        r.raise_for_status()
+        keys[role] = r.json()["key"]
+    return keys

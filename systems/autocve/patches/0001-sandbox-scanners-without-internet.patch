@@ -1,0 +1,64 @@
+diff --git a/backend/app/services/agent/tools/external_tools.py b/backend/app/services/agent/tools/external_tools.py
+index 379d90a..c781eb9 100644
+--- a/backend/app/services/agent/tools/external_tools.py
++++ b/backend/app/services/agent/tools/external_tools.py
+@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
+ from dataclasses import dataclass
+ 
+ from .base import AgentTool, ToolResult
++from app.core.config import settings
+ from .sandbox_tool import SandboxManager
+ 
+ logger = logging.getLogger(__name__)
+@@ -211,7 +212,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
+                 command=cmd_str,
+                 host_workdir=self.project_root,
+                 timeout=300,
+-                network_mode="bridge"  # 🔥 Semgrep 需要网络来下载规则
++                network_mode=settings.SANDBOX_NETWORK_MODE  # pilot: no internet (P1)
+             )
+ 
+             # 🔥 添加调试日志
+@@ -707,7 +708,7 @@ class NpmAuditTool(AgentTool):
+                 command=cmd_str,
+                 host_workdir=self.project_root,
+                 timeout=120,
+-                network_mode="bridge",
++                network_mode=settings.SANDBOX_NETWORK_MODE,  # pilot: no internet (P1)
+                 env=proxy_env
+             )
+             
+diff --git a/backend/app/services/agent/tools/sandbox_tool.py b/backend/app/services/agent/tools/sandbox_tool.py
+index ce6685a..c6d43c6 100644
+--- a/backend/app/services/agent/tools/sandbox_tool.py
++++ b/backend/app/services/agent/tools/sandbox_tool.py
+@@ -514,7 +514,7 @@ class SandboxManager:
+         
+         # 使用带网络的镜像
+         original_network = self.config.network_mode
+-        self.config.network_mode = "bridge"  # 允许网络访问
++        self.config.network_mode = settings.SANDBOX_NETWORK_MODE  # pilot: no internet (P1)
+         
+         try:
+             result = await self.execute_command(command, timeout=timeout)
+diff --git a/backend/app/services/scan_runtime/executors/semgrep.py b/backend/app/services/scan_runtime/executors/semgrep.py
+index 5aa5273..5095f13 100644
+--- a/backend/app/services/scan_runtime/executors/semgrep.py
++++ b/backend/app/services/scan_runtime/executors/semgrep.py
+@@ -7,6 +7,7 @@ from json import JSONDecoder
+ from pathlib import Path
+ from typing import Any
+ 
++from app.core.config import settings
+ from app.services.scan_runtime.models import DEFAULT_SEMGREP_CONFIGS, ScannerExecutionResult, ScannerRequest
+ from app.services.scan_runtime.normalizers import normalize_semgrep_results
+ from app.services.scan_runtime.store import ScanResultStore
+@@ -50,7 +51,7 @@ class SemgrepScanExecutor:
+             command=command,
+             host_workdir=str(self.project_root),
+             timeout=max(1, int(request.timeout_seconds)),
+-            network_mode="bridge",
++            network_mode=settings.SANDBOX_NETWORK_MODE,  # pilot: no internet (P1)
+             artifact_paths=[CONTAINER_OUTPUT_PATH],
+         )
+         duration_ms = self._duration_ms(started_at)
