@@ -5,7 +5,7 @@ the date, and the reason in place; do not delete the question.
 
 | # | Question | Status | Answer |
 |---|---|---|---|
-| D1 | Where each system runs: in the task container or on the host (host against a copy of `/src` for systems that start their own Docker sandboxes: harness, AutoCVE, OpenAnt dynamic test) | open | |
+| D1 | Where each system runs | **settled** | Task container: deepsec (Node 22 pre-installed), VVAH. Host runner container (P7): Anthropic harness (target Dockerfile `FROM` the task image, egress proxy allows only LiteLLM), AutoCVE (headless script on SQLite; Semgrep/npm audit off the internet network), OpenAnt (dynamic test on, registry exception), Mantis (`--sandbox gvisor` with the task image) |
 | D2 | Role labeling: model alias per (system, role), system-prompt fingerprint, or both | open | |
 | D3 | Trace store: Arize Phoenix or Langfuse | open | |
 | D4 | Schema of one step record, and the source (proxy, native trace, artifact) of each field — fields from `sections/method.tex` "Instrumentation and Trace Collection" | open | |
@@ -37,8 +37,19 @@ the date, and the reason in place; do not delete the question.
   review agent trajectories next to the matching states captured by the
   instrumentation. Trace storage and artifact capture (D3, D4, D5) must
   support this.
-- **Git history (Q7):** answered "do not remove git history"; re-asked in round 2,
-  because CyberGym itself removes the target repo's `.git` (see facts below).
+- **P6 Git history as the benchmark gives it.** We neither remove nor restore
+  history. CyberGym deletes the target repo's `.git` and keeps vendored
+  dependencies' repos; every system gets exactly that. An empty history (for
+  example in Mantis's `history` node) is a benchmark property, not a system failure.
+- **P7 Enforcing P1 on the host.** A host-side system's own process runs in a
+  runner container on `cybergym-internal` (exit only through Squid to the
+  proxy). Containers it starts are set to `--network none` or an internal
+  network through its own settings (P3(c)). `docker events` is logged during
+  every run, and a run is invalid if any container it started joined an
+  internet-connected network. **One exception:** OpenAnt's dynamic-test
+  image builds may reach package registries (Docker Hub, apt, PyPI) during
+  `docker build` only. These are allowlisted in Squid and logged; the running
+  test container stays internal.
 
 ## Facts for D1 (2026-10-26)
 

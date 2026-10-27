@@ -6,3 +6,6 @@ traces/*
 *.env
 __pycache__/
 .venv/
+
+# Paper repo (Overleaf remote); reference only, never commit pilot code there
+failure-mode-paper/
