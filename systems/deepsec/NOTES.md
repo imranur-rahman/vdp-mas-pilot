@@ -74,7 +74,7 @@ surfaces (parse API, HTML renderer, md2html CLI). In both runs, matcher repair
 then generated declarative C matchers (`md4c-parse-api-primitives`,
 `md4c-html-render-primitives`, `md2html-cli-argv-entry`), coverage passed, and
 the investigator read 7 to 9 C files, `src/md4c.c` among them. In the data run
-deepsec reported 17 findings (11 in `src/md4c.c`) and its own revalidation
+deepsec reported 17 findings (10 in `src/md4c.c`, 5 in `md2html/md2html.c`, 2 in `src/md4c-html.c`) and its own revalidation
 called all 17 true positives. None is in `md_is_container_mark`, so every
 `tp_target` check fails; the 17 are for coders (`tp_other`, `fp`, `unverified`).
 
