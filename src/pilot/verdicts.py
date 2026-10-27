@@ -131,12 +131,19 @@ def _location_only(finding: dict, ground_truth: list[dict] | None) -> dict:
     if ground_truth is None or not loc.get("file"):
         return {"method": method, "result": "unknown", "evidence": {"location": loc}}
     hunks = [h for h in ground_truth if same_file(loc["file"], h["file"])]
+    has_lines = loc.get("line_start") is not None
+    lo, hi = (loc["line_start"], loc.get("line_end") or loc["line_start"]) if has_lines else (None, None)
+
+    def by_lines(hs):
+        return [h for h in hs if lo <= h["line_end"] and h["line_start"] <= hi] if has_lines else []
+
     if loc.get("function"):
-        hits = [h for h in hunks if h["function"] == loc["function"]]
-        how = "function"
-    elif loc.get("line_start") is not None:
-        lo, hi = loc["line_start"], loc.get("line_end") or loc["line_start"]
-        hits = [h for h in hunks if lo <= h["line_end"] and h["line_start"] <= hi]
+        # Hunks without function context in their header fall back to line overlap.
+        hits = [h for h in hunks if h["function"] == loc["function"]] + by_lines(
+            [h for h in hunks if not h["function"]])
+        how = "function" if all(h["function"] for h in hunks) else "function_or_lines"
+    elif has_lines:
+        hits = by_lines(hunks)
         how = "lines"
     else:
         hits, how = hunks, "file"

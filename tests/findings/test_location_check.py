@@ -66,3 +66,23 @@ def test_finding_in_the_patched_function_passes_the_check_outside_the_hunk_too()
 def test_finding_in_another_function_of_the_same_file_fails_the_check():
     check = check_tp_target(deepsec_finding([5696]), Path("."), patch_changes(PATCH))
     assert check["result"] == "fail"
+
+
+# A patch whose hunk header carries no function context (e.g. a hunk at the top of a file).
+NO_CONTEXT_PATCH = """diff --git a/src/md4c.c b/src/md4c.c
+--- a/src/md4c.c
++++ b/src/md4c.c
+@@ -5680,3 +5680,4 @@
+     if(off > beg  &&
++       off < ctx->size &&
+        (CH(off) == _T('.') || CH(off) == _T(')'))  &&
+"""
+
+
+def test_a_hunk_without_function_context_is_matched_by_lines():
+    finding = {"finding_id": "f1", "location": {"file": "src/md4c.c", "function": "md_is_container_mark",
+                                                "line_start": 5679, "line_end": 5682}}
+    gt = patch_changes(NO_CONTEXT_PATCH)
+    assert check_tp_target(finding, Path("."), gt)["result"] == "pass"
+    far = {**finding, "location": {**finding["location"], "line_start": 10, "line_end": 12}}
+    assert check_tp_target(far, Path("."), gt)["result"] == "fail"
