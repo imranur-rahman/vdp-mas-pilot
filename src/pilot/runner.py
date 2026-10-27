@@ -73,8 +73,7 @@ def run_claude_code(task: str, kind: str, budget_usd: float | None, timeout_s: i
     try:
         run_agent.main()
     except SystemExit as e:
-        if e.code not in (0, None):
-            error = f"run_agent exited {e.code}"
+        meta["cybergym_exit_code"] = e.code  # 1 means the task failed, not the harness
     except Exception as e:  # recorded, not swallowed silently
         error = repr(e)
     finally:
@@ -85,24 +84,49 @@ def run_claude_code(task: str, kind: str, budget_usd: float | None, timeout_s: i
     return run_dir
 
 
+def stream_stops(records: list[dict]) -> list[dict]:
+    """stop_reason and stop_details of each streamed call, from the raw events.
+
+    LiteLLM's reassembled response does not carry Anthropic's stop details.
+    """
+    stops = []
+    for r in records:
+        if r.get("record") != "stream":
+            continue
+        for event in r.get("events") or []:
+            for line in str(event).split("\n"):
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    d = json.loads(line[5:])
+                except ValueError:
+                    continue
+                if d.get("type") == "message_delta":
+                    delta = d.get("delta") or {}
+                    stops.append({"stop_reason": delta.get("stop_reason"),
+                                  "stop_details": delta.get("stop_details"),
+                                  "cost": (d.get("usage") or {}).get("cost")})
+    return stops
+
+
 def _outcome(run_dir: Path, minted: list[str], budget: float, error: str | None) -> dict:
     """Run outcome from the proxy log: refusals and budget exhaustion are not system failures."""
     log = run_dir / "proxy.jsonl"
     records = [json.loads(l) for l in log.read_text().splitlines()] if log.exists() else []
-    refusals = []
-    spend = 0.0
-    for r in records:
-        slo = r.get("standard_logging_object") or {}
-        spend += slo.get("response_cost") or 0.0
-        resp = r.get("response") if isinstance(r.get("response"), dict) else {}
-        if resp.get("stop_reason") == "refusal":
-            refusals.append(resp.get("stop_details"))
-    budget_hit = any("budget" in (r.get("exception") or "").lower() for r in records)
-    if refusals and records and (records[-1].get("response") or {}).get("stop_reason") == "refusal":
+    calls = [r for r in records if r.get("record") == "call"]
+    stops = stream_stops(records)
+    refusals = [s["stop_details"] for s in stops if s["stop_reason"] == "refusal"]
+    budget_hit = any("budget" in (r.get("exception") or "").lower() for r in calls)
+    if stops and stops[-1]["stop_reason"] == "refusal":
         outcome = "refused"
     elif budget_hit:
         outcome = "budget_exhausted"
     else:
         outcome = "completed"
-    return {"outcome": outcome, "model_calls": len(records), "spend_usd_from_log": round(spend, 4),
-            "refusals": refusals, "harness_error": error, "keys_minted": len(minted)}
+    return {
+        "outcome": outcome, "model_calls": len(calls), "refusals": refusals,
+        "cost_usd_openrouter": round(sum(s["cost"] or 0 for s in stops), 4),
+        "cost_usd_estimate": round(sum((r.get("standard_logging_object") or {}).get("response_cost") or 0
+                                       for r in calls), 4),
+        "harness_error": error, "keys_minted": len(minted),
+    }
