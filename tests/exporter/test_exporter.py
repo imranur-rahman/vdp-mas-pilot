@@ -57,11 +57,24 @@ def test_each_call_stores_only_its_new_input(bundles):
     assert all(s["parent_step_id"] == prev["step_id"] for prev, s in zip(ls, ls[1:]))
 
 
+def same_conversation(m):
+    """Message content apart from transport detail: Claude Code moves the
+    `cache_control` marker to the newest message on every call, and sends a
+    lone text block either as a string or as a one-block list."""
+    if isinstance(m, list):
+        return [same_conversation(x) for x in m]
+    if isinstance(m, dict):
+        if isinstance(m.get("content"), str) and "role" in m:
+            m = {**m, "content": [{"type": "text", "text": m["content"]}]}
+        return {k: same_conversation(v) for k, v in m.items() if k != "cache_control"}
+    return m
+
+
 def test_input_deltas_rebuild_the_full_conversation(bundles):
     ls = llm_steps(bundles[DEV])
     rebuilt = [m for s in ls for m in s["input_delta"]]
     last_call = [r for r in load_proxy_log(FIXTURES / DEV) if r["record"] == "call"][-1]
-    assert rebuilt == last_call["upstream_request"]["messages"]
+    assert same_conversation(rebuilt) == same_conversation(last_call["upstream_request"]["messages"])
 
 
 def test_thinking_summaries_are_kept_apart_from_output_and_labeled(bundles):
@@ -92,7 +105,8 @@ def test_validation_stages_are_oracle_steps_linked_to_what_they_checked(bundles)
     oracle = [s for s in steps(bundles[DEV]) if s["step_type"] == "oracle_run"]
     assert [s["output"] for s in oracle] == ["passed", "passed", "passed", "failed"]
     assert all(s["oracle_ref"]["source"] == "cybergym" for s in oracle)
-    poc, patch = oracle[0]["oracle_ref"]["poc"], oracle[0]["oracle_ref"]["patch"]
+    # stage 2 runs the agent's PoC against the agent's patch, so it links both
+    poc, patch = oracle[1]["oracle_ref"]["poc"], oracle[1]["oracle_ref"]["patch"]
     assert (bundles[DEV] / poc).read_bytes().endswith(b"[a](b")
     assert (bundles[DEV] / patch).read_text().startswith("--- a/src/md4c.c")
     refused = [s for s in steps(bundles[DATA]) if s["step_type"] == "oracle_run"]
@@ -116,3 +130,19 @@ def test_trajectory_renders_every_step_for_a_reader(bundles, name):
 
 def test_rendered_thinking_is_labeled_as_a_summary(bundles):
     assert "Thinking (model-written summary" in (bundles[DATA] / "trajectory.md").read_text()
+
+
+def test_export_needs_nothing_but_the_run_folder(tmp_path, monkeypatch):
+    """No Phoenix, no proxy, no network: the run folder alone makes the bundle."""
+    import socket
+
+    def no_network(*a, **k):
+        raise AssertionError("exporter tried to open a network connection")
+
+    monkeypatch.setattr(socket, "socket", no_network)
+    monkeypatch.setattr(socket, "create_connection", no_network)
+    run_dir = tmp_path / DATA
+    shutil.copytree(FIXTURES / DATA, run_dir)
+    bundle = export(run_dir)
+    assert bundle.is_relative_to(run_dir)
+    assert len(steps(bundle)) == 10

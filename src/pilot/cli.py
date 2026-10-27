@@ -3,8 +3,9 @@ until your login session picks up the docker group."""
 
 import argparse
 import json
+from pathlib import Path
 
-from . import infra, isolation, runner
+from . import exporter, infra, isolation, runner
 
 
 RUNS = {"claude-code": runner.run_claude_code, "claude-code-runner": runner.run_claude_code_in_runner}
@@ -30,6 +31,10 @@ def main():
     run.add_argument("--budget", type=float, help="hard cap in USD (default: dev 2, data 20)")
     run.add_argument("--timeout", type=int, default=5400, help="agent timeout in seconds")
     run.set_defaults(fn=lambda a: print("run folder:", RUNS[a.system](a.task, a.kind, a.budget, a.timeout)))
+
+    exp = sub.add_parser("export", help="build the trajectory bundle for a run folder (no Docker needed)")
+    exp.add_argument("run_dir", type=Path)
+    exp.set_defaults(fn=lambda a: print("bundle:", exporter.export(a.run_dir)))
 
     args = p.parse_args()
     args.fn(args)
