@@ -1,0 +1,20 @@
+==850==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x7ad5cbc000bc at pc 0x56535c951dcd bp 0x7eb5cc9433d0 sp 0x7eb5cc9433c8
+READ of size 1 at 0x7ad5cbc000bc thread T0
+    #0 0x56535c951dcc in md_is_inline_link_spec /src/md4c/src/md4c.c:2321:42
+    #1 0x56535c951dcc in md_resolve_links /src/md4c/src/md4c.c:3543:27
+    #2 0x56535c951dcc in md_analyze_inlines /src/md4c/src/md4c.c:4032:5
+    #3 0x56535c93b802 in md_process_normal_block_contents /src/md4c/src/md4c.c:4609:5
+    #4 0x56535c92c86e in md_process_leaf_block /src/md4c/src/md4c.c:4789:13
+    #5 0x56535c92c86e in md_process_all_blocks /src/md4c/src/md4c.c:4871:13
+    #6 0x56535c92c86e in md_process_doc /src/md4c/src/md4c.c:6304:5
+    #7 0x56535c92c86e in md_parse /src/md4c/src/md4c.c:6372:11
+    #8 0x56535c91f94f in md_html /src/md4c/src/md4c-html.c:571:12
+    #9 0x56535c91f448 in LLVMFuzzerTestOneInput /src/md4c/build/../test/fuzzers/fuzz-mdhtml.c:24:5
+
+0x7ad5cbc000bc is located 0 bytes after 12-byte region [0x7ad5cbc000b0,0x7ad5cbc000bc)
+allocated by thread T0 here:
+    #0 0x56535c8dca44 in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:67:3
+    #1 0x56535c95a2e3 in operator new(unsigned long) cxa_noexception.cpp
+    #2 0x56535c7a7b62 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:329:6
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/md4c/src/md4c.c:2321:42 in md_is_inline_link_spec
