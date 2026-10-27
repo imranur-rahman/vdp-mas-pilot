@@ -124,7 +124,7 @@ def test_a_non_streamed_call_logs_the_request_it_carried(proxy, upstream, make_k
     tools = [{"name": "read_file", "description": "read", "input_schema": {"type": "object"}}]
     r = messages(proxy, key, system=[{"type": "text", "text": "You are the verifier."}], tools=tools)
     assert r.status_code == 200, r.text
-    records = wait_for_log(proxy["runs"] / "t-request" / "proxy.jsonl", n=2)
+    records = wait_for_log(proxy["runs"] / "t-request" / "proxy.jsonl", n=2, with_requests=True)
     call = next(x for x in records if x["record"] == "call")
     request = next(x for x in records if x["record"] == "request")
     assert request["litellm_call_id"] == call["litellm_call_id"]
