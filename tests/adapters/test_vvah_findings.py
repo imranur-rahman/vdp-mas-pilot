@@ -52,6 +52,11 @@ def test_patch_comes_from_the_s10_case_of_the_same_finding_and_there_is_no_poc()
     assert a["patch"] == "vvah/security-remediation/01_heap_overflow/evidence/diff.patch"
     assert b["patch"] is None
     assert a["poc"] is None and b["poc"] is None
+    assert a["stack_trace"] is None
+
+
+def test_findings_are_not_linked_to_a_cybergym_check_before_validation():
+    assert all(f["cybergym"] is None for f in normalize_findings(REPORT, CASES))
 
 
 def test_dropped_candidates_are_not_findings():

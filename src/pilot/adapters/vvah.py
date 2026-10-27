@@ -118,6 +118,8 @@ def normalize_findings(report: dict, cases: list[dict]) -> list[dict]:
             "system_verdict": {"verdict": f.get("verdict"), "confidence": f.get("verdict_confidence")},
             "poc": None,
             "patch": patch_of.get(finding_id),
+            "stack_trace": None,
+            "cybergym": None,  # set by validate() once the finding's patch has been checked
         })
     return out
 
@@ -181,6 +183,8 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
             raise RuntimeError(f"VVAH install failed: {err[-1000:]}")
         copy_to_container(cid, vvah_dir / "config.local.yaml", f"{IN}/vvah/config.local.yaml")
         copy_to_container(cid, COLLECTOR, f"{IN}/collector.py")
+        # VVAH trusts an overlay only if the invoking user (root) owns it and no one else can write it.
+        exec_run(cid, f"chown -R root:root {IN} && chmod -R go-w {IN}", check=True, verbose=False)
         _, freeze, _ = exec_run(cid, "/opt/vvah/bin/pip freeze", verbose=False)
         (vvah_dir / "pip-freeze.txt").write_text(freeze)
 
@@ -217,11 +221,11 @@ def run(task: str, kind: str, budget_usd: float | None, timeout_s: int) -> Path:
     findings = []
     try:
         findings = collect_findings(run_dir)
-        (run_dir / "findings.json").write_text(json.dumps(findings, indent=2))
     except Exception as e:
         error = (error + "; " if error else "") + f"output adapter: {e!r}"
     if (run_dir / "output" / "fix.patch").exists():
         validate(run_dir, task, findings, data_path, script_path, build_image)
+    (run_dir / "findings.json").write_text(json.dumps({"findings": findings}, indent=2))
 
     meta.update(finished_at=time.time(), error=error,
                 outcome=runner._outcome(run_dir, [key], budget, error))
@@ -245,7 +249,10 @@ def collect_findings(run_dir: Path) -> list[dict]:
 
 def validate(run_dir: Path, task: str, findings: list[dict], data_path: Path, script_path: Path,
              build_image: str) -> None:
-    """CyberGym stages 3-4 on the whole patch and on each finding's own patch (F-1)."""
+    """CyberGym stages 3-4 on the whole patch and on each finding's own patch (F-1).
+
+    Each finding with a patch is linked to the summary of its own check.
+    """
     infra._import_cybergym()
     import run_agent
 
@@ -264,6 +271,9 @@ def validate(run_dir: Path, task: str, findings: list[dict], data_path: Path, sc
             attempt.update(stage3="no_patch", stage4="skipped")
         (out / "summary.json").write_text(json.dumps(
             {"mode": "patch-only", "patch_scope": name, "attempts": [attempt]}, indent=2))
+        for f in findings:
+            if name == f"finding_{f['finding_id']}":
+                f["cybergym"] = {"summary": str((out / "summary.json").relative_to(run_dir)), "attempt": 1}
 
 
 def _copy_out(cid: str, src: str, dst: Path) -> None:
