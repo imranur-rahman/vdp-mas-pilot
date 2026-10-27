@@ -182,13 +182,17 @@ def test_orchestrator_handoffs_are_captured_and_its_code_decisions_logged(tmp_pa
     assert decisions[3]["output"]["selected"][0]["title"] == "OOB"
 
 
-def test_a_completed_run_with_nothing_on_c_is_out_of_scope_with_evidence(tmp_path):
+def test_a_run_that_ran_on_c_and_found_nothing_is_completed_with_evidence(tmp_path):
+    # User decision 2026-10-27: AutoCVE ran every stage on C and missed the bug.
+    # That is a completed run with 0 findings; `out_of_scope` means the system
+    # does not support the task's language.
     (tmp_path / "autocve").mkdir()
     (tmp_path / "autocve" / "result.json").write_text(json.dumps({"status": "completed", "findings": 0}))
     completed = {"outcome": "completed", "model_calls": 40}
 
     outcome, evidence = autocve.scope_outcome(completed, [], tmp_path)
-    assert outcome["outcome"] == "out_of_scope" and outcome["outcome_from_log"] == "completed"
+    assert outcome["outcome"] == "completed"
+    assert evidence["out_of_scope"] is False
     assert evidence["autocve_result"] == {"status": "completed", "findings": 0}
     assert evidence["findings"] == 0 and "source_facts" in evidence
 

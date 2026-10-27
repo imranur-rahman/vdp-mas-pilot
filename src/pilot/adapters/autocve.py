@@ -438,18 +438,22 @@ SOURCE_FACTS = {
 
 
 def scope_outcome(outcome: dict, findings: list[dict], run_dir: Path) -> tuple[dict, dict | None]:
-    """D8: a run that completed but produced nothing on the C task is `out_of_scope`.
+    """D8 evidence for a completed run that produced nothing on the C task.
 
-    Budget exhaustion and refusals keep their outcome. The evidence goes into
-    run.json (`scope_evidence`) and the rendered trajectory.
+    The outcome stays `completed` (decision 2026-10-27): AutoCVE runs every
+    stage on C source, so "ran and found nothing" is a result to report, not
+    `out_of_scope` (the system does not support the task's language). The
+    evidence goes into run.json (`scope_evidence`) and the rendered trajectory.
+    Budget exhaustion and refusals keep their outcome.
     """
     if outcome.get("outcome") != "completed" or findings:
         return outcome, None
     result = Path(run_dir) / "autocve" / "result.json"
     evidence = {
+        "out_of_scope": False,
         "findings": 0,
         "model_calls": outcome.get("model_calls"),
         "autocve_result": json.loads(result.read_text()) if result.exists() else None,
         "source_facts": SOURCE_FACTS,
     }
-    return {**outcome, "outcome": "out_of_scope", "outcome_from_log": outcome["outcome"]}, evidence
+    return outcome, evidence
