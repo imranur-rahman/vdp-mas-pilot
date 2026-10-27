@@ -6,10 +6,11 @@ import json
 from pathlib import Path
 
 from . import claims, coding, deepsec_run, exporter, infra, isolation, mantis, runner
+from .adapters import harness_run
 
 
 RUNS = {"claude-code": runner.run_claude_code, "claude-code-runner": runner.run_claude_code_in_runner,
-        "deepsec": deepsec_run.run_deepsec, "mantis": mantis.run_mantis}
+        "deepsec": deepsec_run.run_deepsec, "anthropic-harness": harness_run.run, "mantis": mantis.run_mantis}
 
 
 def _run_vvah(*args):
@@ -34,9 +35,9 @@ def main():
 
     run = sub.add_parser("run", help="run one system on one task")
     run.add_argument("system", choices=sorted(RUNS),
-                     help="claude-code: in the task container; claude-code-runner: in a runner container;"
-                          " visa-vvah: VVAH in the task container; deepsec: in the task container;"
-                          " mantis: Mantis in a runner container")
+                     help="claude-code / claude-code-runner / visa-vvah / deepsec in/near the task container;"
+                          " anthropic-harness: on the host, agents in gVisor on cybergym-internal;"
+                          " mantis: runner container, gVisor sandboxes on the task image")
     run.add_argument("task", help="CyberGym-E2E task, e.g. md4c/arvo_31332")
     run.add_argument("--kind", choices=["dev", "data"], required=True)
     run.add_argument("--budget", type=float, help="hard cap in USD (default: dev 2, data 20)")
